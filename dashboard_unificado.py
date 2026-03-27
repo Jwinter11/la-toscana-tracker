@@ -93,7 +93,7 @@ def _check_password() -> None:
         </style>
         <div class="suite-login">
           <div class="suite-login-kicker">🫒 La Toscana Tracker</div>
-          <div class="suite-login-title">Inteligencia comercial<br>en una sola vista</div>
+          <div class="suite-login-title">Dashboard de precios<br>en una sola vista</div>
           <div class="suite-login-copy">Ingresá la contraseña para acceder al tablero unificado.</div>
         </div>
         """,
