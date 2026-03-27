@@ -1008,6 +1008,37 @@ def hbar(x_vals, y_vals, colores, textos, titulo_x, altura=340):
     return fig
 
 
+def color_marca_real_ac(marca: str) -> str:
+    return COLORES_MARCA_AC.get(categorizar_marca_ac(marca), "#9CA3AF")
+
+
+def aplicar_filtros_mi_marca_ac(
+    df: pd.DataFrame,
+    variedad: str = "Todas",
+    gramaje: str = "Todos",
+    envase: str = "Todos",
+) -> pd.DataFrame:
+    df = df.copy()
+    if variedad != "Todas":
+        df = df[df["Variedad"] == variedad]
+    if gramaje != "Todos":
+        df = df[df["Gramaje"] == gramaje]
+    if envase != "Todos":
+        df = df[df["Envase"] == envase]
+    return df
+
+
+def preparar_metrica_mi_marca_ac(df: pd.DataFrame, modo: str) -> tuple[pd.DataFrame, str, str]:
+    df = df.copy()
+    if modo == "$/kg":
+        df = df.dropna(subset=["Precio_100g"])
+        df["_mm_metric"] = df["Precio_100g"] * 10
+        return df, "$/kg", "$/kg promedio"
+    df = df.dropna(subset=["Precio"])
+    df["_mm_metric"] = df["Precio"]
+    return df, "$", "Precio góndola promedio"
+
+
 # ---------------------------------------------------------------------------
 # Sidebar — filtros
 # ---------------------------------------------------------------------------
@@ -1024,7 +1055,7 @@ with st.sidebar:
     _page_sel = st.radio(
         "Navegación",
         ["📊  Resumen", "🫒  Por Variedad", "🏪  Por Cadena", "🏷️  Por Marca",
-         "📈  Evolución", "🔖  Ofertas", "📦  Quiebres", "🔢  Tabla dinámica"],
+         "🎯  Mi Marca", "📈  Evolución", "🔖  Ofertas", "📦  Quiebres", "🔢  Tabla dinámica"],
         key="nav_radio_aceitunas" if UNIFIED_MODE else "nav_radio",
         label_visibility="collapsed",
     )
@@ -2336,3 +2367,362 @@ if active_page == "Base":
         }),
         use_container_width=True, hide_index=True, height=600,
     )
+
+
+if active_page == "Mi Marca":
+    _mm_marcas_opts = sorted(
+        m for m in df_full["Marca"].dropna().unique()
+        if str(m).strip() and str(m).strip().lower() != "desconocida"
+    )
+    if not _mm_marcas_opts:
+        st.info("Sin marcas disponibles para analizar.")
+    else:
+        _mm_def_idx = _mm_marcas_opts.index("La Toscana") if "La Toscana" in _mm_marcas_opts else 0
+
+        _mm_c1, _mm_c2, _mm_c3, _mm_c4, _mm_c5 = st.columns([2.1, 1.4, 1.2, 1.2, 1.3])
+        with _mm_c1:
+            st.markdown('<p style="color:#111827;font-size:0.8rem;font-weight:700;margin-bottom:2px">🎯 Marca</p>', unsafe_allow_html=True)
+            _mm_sel = st.selectbox("Marca", _mm_marcas_opts, index=_mm_def_idx,
+                                   key="mm_ac_marca", label_visibility="collapsed")
+
+        _mm_hist_base = df_full[(df_full["Marca"] == _mm_sel) & (df_full["Cadena"].isin(cadenas_sel))].copy()
+        _mm_vars_opts = sorted(_mm_hist_base["Variedad"].dropna().unique())
+        _mm_gram_keys = [g for g in GRAMAJE_GRUPOS if _mm_hist_base["Gramaje"].eq(g).any()]
+        _mm_gram_labels = [gramaje_grupo_label(g) for g in _mm_gram_keys]
+        _mm_env_opts = [e for e in envases_disp if (_mm_hist_base["Envase"] == e).any()]
+
+        with _mm_c2:
+            st.markdown('<p style="color:#111827;font-size:0.8rem;font-weight:700;margin-bottom:2px">Variedad</p>', unsafe_allow_html=True)
+            _mm_var_sel = st.selectbox("Variedad", ["Todas"] + _mm_vars_opts,
+                                       key="mm_ac_var", label_visibility="collapsed")
+        with _mm_c3:
+            st.markdown('<p style="color:#111827;font-size:0.8rem;font-weight:700;margin-bottom:2px">Gramaje</p>', unsafe_allow_html=True)
+            _mm_gram_lbl = st.selectbox("Gramaje", ["Todos"] + _mm_gram_labels,
+                                        key="mm_ac_gram", label_visibility="collapsed")
+        with _mm_c4:
+            st.markdown('<p style="color:#111827;font-size:0.8rem;font-weight:700;margin-bottom:2px">Envase</p>', unsafe_allow_html=True)
+            _mm_env_sel = st.selectbox("Envase", ["Todos"] + _mm_env_opts,
+                                       key="mm_ac_env", label_visibility="collapsed")
+        with _mm_c5:
+            st.markdown('<p style="color:#111827;font-size:0.8rem;font-weight:700;margin-bottom:2px">Comparar por</p>', unsafe_allow_html=True)
+            _mm_mode = st.selectbox("Comparar por", ["$/kg", "Precio góndola"],
+                                    key="mm_ac_mode", label_visibility="collapsed")
+
+        _mm_gram_sel = next(
+            (g for g, lbl in zip(_mm_gram_keys, _mm_gram_labels) if lbl == _mm_gram_lbl),
+            "Todos",
+        )
+        _mm_hist_filtered = aplicar_filtros_mi_marca_ac(
+            _mm_hist_base, _mm_var_sel, _mm_gram_sel, _mm_env_sel
+        )
+        _mm_dff = aplicar_filtros_mi_marca_ac(
+            dff[(dff["Marca"] == _mm_sel) & (dff["Cadena"].isin(cadenas_sel))].copy(),
+            _mm_var_sel, _mm_gram_sel, _mm_env_sel
+        )
+        _mm_resto = aplicar_filtros_mi_marca_ac(
+            dff[(dff["Marca"] != _mm_sel) & (dff["Cadena"].isin(cadenas_sel))].copy(),
+            _mm_var_sel, _mm_gram_sel, _mm_env_sel
+        )
+        _mm_market = aplicar_filtros_mi_marca_ac(
+            dff[dff["Cadena"].isin(cadenas_sel)].copy(),
+            _mm_var_sel, _mm_gram_sel, _mm_env_sel
+        )
+
+        _mm_metric_brand, _mm_metric_unit, _mm_metric_axis = preparar_metrica_mi_marca_ac(_mm_dff, _mm_mode)
+        _mm_metric_resto, _, _ = preparar_metrica_mi_marca_ac(_mm_resto, _mm_mode)
+        _mm_metric_market, _, _ = preparar_metrica_mi_marca_ac(_mm_market, _mm_mode)
+
+        if _mm_hist_filtered.empty or _mm_metric_brand.empty:
+            st.info("Sin datos para esa marca con los filtros actuales.")
+        else:
+            _mm_fmt = (lambda v: f"${v:,.0f}/kg") if _mm_mode == "$/kg" else (lambda v: f"${v:,.0f}")
+            _mm_avg_brand = _mm_metric_brand["_mm_metric"].mean() if not _mm_metric_brand.empty else 0
+            _mm_avg_market = _mm_metric_resto["_mm_metric"].mean() if not _mm_metric_resto.empty else 0
+            _mm_prima = ((_mm_avg_brand / _mm_avg_market) - 1) * 100 if _mm_avg_market > 0 else 0
+            _mm_skus = _mm_hist_filtered["SKU_canonico"].nunique()
+            _mm_cadenas = _mm_hist_filtered["Cadena"].nunique()
+            _mm_marca_color = color_marca_real_ac(_mm_sel)
+
+            _mm_k1, _mm_k2, _mm_k3, _mm_k4, _mm_k5 = st.columns(5)
+            _mm_kpis = [
+                ("orange", f"{_mm_metric_unit} marca", _mm_fmt(_mm_avg_brand), f"promedio {_mm_sel}"),
+                ("", f"{_mm_metric_unit} mercado", _mm_fmt(_mm_avg_market) if _mm_avg_market else "—", "promedio resto marcas"),
+                ("red" if _mm_prima > 0 else "green", "Prima vs mercado", f"{_mm_prima:+.1f}%", "más cara" if _mm_prima > 0 else "más barata"),
+                ("purple", "SKUs activos", str(_mm_skus), "familias visibles de la marca"),
+                ("teal", "Presencia", str(_mm_cadenas), "cadenas donde figura"),
+            ]
+            for _col_mm, (_cls, _lab, _val, _sub) in zip([_mm_k1, _mm_k2, _mm_k3, _mm_k4, _mm_k5], _mm_kpis):
+                with _col_mm:
+                    st.markdown(
+                        f"""<div class="kpi-card {_cls}">
+                        <div class="kpi-label">{_lab}</div>
+                        <div class="kpi-value" style="font-size:{'1.05rem' if len(_val)>12 else '1.55rem'}">{_val}</div>
+                        <div class="kpi-sub">{_sub}</div>
+                        </div>""",
+                        unsafe_allow_html=True,
+                    )
+
+            with st.expander("📊 Precio relativo vs mercado", expanded=True):
+                _mm_by_brand = (_mm_metric_market.groupby("Marca")["_mm_metric"]
+                                .mean().sort_values().reset_index())
+                if not _mm_by_brand.empty:
+                    _mm_colors = [
+                        _mm_marca_color if m == _mm_sel else "#E5E7EB"
+                        for m in _mm_by_brand["Marca"]
+                    ]
+                    fig_mm_bar = hbar(
+                        _mm_by_brand["_mm_metric"].tolist(),
+                        _mm_by_brand["Marca"].tolist(),
+                        _mm_colors,
+                        [_mm_fmt(v) for v in _mm_by_brand["_mm_metric"]],
+                        _mm_metric_axis,
+                        altura=max(320, len(_mm_by_brand) * 32 + 80),
+                    )
+                    st.plotly_chart(fig_mm_bar, use_container_width=True)
+
+            with st.expander("🏪 Presencia por cadena", expanded=True):
+                _mm_heat_src, _, _ = preparar_metrica_mi_marca_ac(_mm_dff, _mm_mode)
+                _mm_pres_piv = (_mm_heat_src.groupby(["SKU_canonico", "Cadena"])["_mm_metric"]
+                                .mean().round(0).unstack("Cadena"))
+                if not _mm_pres_piv.empty:
+                    _mm_text = [[_mm_fmt(v) if not pd.isna(v) else "—" for v in row]
+                                for row in _mm_pres_piv.values]
+                    fig_mm_h = go.Figure(go.Heatmap(
+                        z=_mm_pres_piv.values,
+                        x=_mm_pres_piv.columns.tolist(),
+                        y=_mm_pres_piv.index.tolist(),
+                        colorscale="RdYlGn_r",
+                        text=_mm_text,
+                        texttemplate="%{text}",
+                        textfont=dict(size=12, color="#111827"),
+                        colorbar=dict(title=_mm_metric_axis, tickprefix="$", tickformat=",",
+                                      tickfont=dict(color="#111827"),
+                                      title_font=dict(color="#111827")),
+                    ))
+                    fig_mm_h.update_layout(
+                        **_BASE_CORE,
+                        height=max(300, len(_mm_pres_piv) * 42 + 80),
+                        xaxis=dict(tickfont=dict(size=12, color="#111827"), side="top"),
+                        yaxis=dict(tickfont=dict(size=11, color="#111827")),
+                    )
+                    st.plotly_chart(fig_mm_h, use_container_width=True)
+
+                    _mm_cad_x_sku = (_mm_hist_filtered.groupby("SKU_canonico")["Cadena"]
+                                     .nunique().reset_index(name="n_cad")
+                                     .sort_values("n_cad", ascending=False))
+                    if not _mm_cad_x_sku.empty:
+                        _mm_cols_pres = st.columns(min(6, len(_mm_cad_x_sku)))
+                        for _ci, (_, _row_pres) in enumerate(_mm_cad_x_sku.head(6).iterrows()):
+                            with _mm_cols_pres[_ci]:
+                                st.markdown(
+                                    f"<div style='background:#F9FAFB;border-radius:8px;padding:0.55rem 0.7rem;font-size:0.72rem;text-align:center'>"
+                                    f"<b style='color:#111827'>{_row_pres['n_cad']}</b><br>"
+                                    f"<span style='color:#6B7280'>{_row_pres['SKU_canonico'][:24]}...</span></div>",
+                                    unsafe_allow_html=True,
+                                )
+                else:
+                    st.info("Sin datos de presencia para esa selección.")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown('<div class="chart-title">⚔️ Comparativa vs competidores</div>', unsafe_allow_html=True)
+            _mm_other_brands = sorted(
+                m for m in _mm_market["Marca"].dropna().unique()
+                if m != _mm_sel
+            )
+            if not _mm_other_brands:
+                st.info("No hay competidores suficientes con los filtros actuales.")
+            else:
+                _mm_cc1, _mm_cc2, _ = st.columns([2, 2, 3])
+                with _mm_cc1:
+                    _mm_comp1 = st.selectbox("Competidor 1", _mm_other_brands,
+                                             key="mm_ac_comp1", index=0)
+                with _mm_cc2:
+                    _mm_comp2_idx = 1 if len(_mm_other_brands) > 1 else 0
+                    _mm_comp2 = st.selectbox("Competidor 2", _mm_other_brands,
+                                             key="mm_ac_comp2", index=_mm_comp2_idx)
+
+                _mm_ev_base = aplicar_filtros_mi_marca_ac(
+                    dff[dff["Marca"].isin([_mm_sel, _mm_comp1, _mm_comp2])].copy(),
+                    _mm_var_sel, _mm_gram_sel, _mm_env_sel,
+                )
+                _mm_ev_metric, _, _ = preparar_metrica_mi_marca_ac(_mm_ev_base, _mm_mode)
+                _orden_per_mm = sorted(
+                    dff["Periodo"].unique(),
+                    key=lambda p: df_full[df_full["Periodo"] == p]["Fecha"].min(),
+                )
+                _mm_ev_df = (_mm_ev_metric.groupby(["Periodo", "Marca"])["_mm_metric"]
+                             .mean().reset_index())
+                _mm_ev_df["Periodo"] = pd.Categorical(
+                    _mm_ev_df["Periodo"], categories=_orden_per_mm, ordered=True
+                )
+                _mm_ev_cmap = {
+                    _mm_sel: _mm_marca_color,
+                    _mm_comp1: "#9CA3AF",
+                    _mm_comp2: "#D1D5DB",
+                }
+                if len(_orden_per_mm) < 2:
+                    _mm_bar_df = (_mm_ev_df.groupby("Marca")["_mm_metric"]
+                                  .mean().reset_index().sort_values("_mm_metric"))
+                    fig_mm_ev = go.Figure(go.Bar(
+                        x=_mm_bar_df["_mm_metric"], y=_mm_bar_df["Marca"],
+                        orientation="h",
+                        marker_color=[_mm_ev_cmap.get(m, "#9CA3AF") for m in _mm_bar_df["Marca"]],
+                        text=[_mm_fmt(v) for v in _mm_bar_df["_mm_metric"]],
+                        textposition="outside", cliponaxis=False,
+                    ))
+                    fig_mm_ev.update_layout(
+                        **_BASE_CORE,
+                        height=260,
+                        margin=dict(l=10, r=160, t=30, b=10),
+                        xaxis=dict(title=_mm_metric_axis, tickprefix="$", tickformat=",",
+                                   tickfont=dict(size=12, color="#111827")),
+                        showlegend=False,
+                    )
+                else:
+                    fig_mm_ev = px.line(
+                        _mm_ev_df, x="Periodo", y="_mm_metric", color="Marca",
+                        markers=True, color_discrete_map=_mm_ev_cmap,
+                        labels={"_mm_metric": _mm_metric_axis, "Periodo": "", "Marca": "Marca"},
+                        height=400,
+                    )
+                    fig_mm_ev.update_traces(line=dict(width=2.5), marker=dict(size=8))
+                    fig_mm_ev.update_layout(
+                        **_BASE_CORE,
+                        yaxis=dict(title=_mm_metric_axis, tickprefix="$", tickformat=",",
+                                   tickfont=dict(size=12, color="#111827")),
+                        xaxis=dict(tickfont=dict(size=12, color="#111827")),
+                    )
+                st.plotly_chart(fig_mm_ev, use_container_width=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown('<div class="chart-title">🏷️ Comportamiento de ofertas</div>', unsafe_allow_html=True)
+            _mm_of_src = _mm_hist_filtered.copy()
+            _mm_of_rate = (_mm_of_src.groupby(["SKU_canonico", "Periodo"])["En_oferta"]
+                           .max().reset_index()
+                           .groupby("SKU_canonico")["En_oferta"]
+                           .mean().mul(100).reset_index(name="pct_sem_of"))
+            _mm_of_cadenas = (_mm_of_src[_mm_of_src["En_oferta"]]
+                              .groupby("SKU_canonico")["Cadena"]
+                              .apply(lambda x: ", ".join(sorted(x.unique())))
+                              .reset_index(name="cadenas_oferta"))
+            _mm_desc_avg = (_mm_of_src[_mm_of_src["En_oferta"]]
+                            .groupby("SKU_canonico")["Descuento_pct"]
+                            .mean().reset_index(name="desc_prom"))
+            _mm_of_tbl = (_mm_of_rate.merge(_mm_desc_avg, on="SKU_canonico", how="left")
+                                     .merge(_mm_of_cadenas, on="SKU_canonico", how="left")
+                                     .fillna({"desc_prom": 0, "cadenas_oferta": "—"}))
+            _mm_of_tbl.columns = ["SKU", "% sem. en oferta", "Dto. prom. (%)", "Cadenas donde ofertó"]
+            _mm_desc_merc = aplicar_filtros_mi_marca_ac(
+                df_full[(df_full["Marca"] != _mm_sel) & df_full["En_oferta"] & (df_full["Cadena"].isin(cadenas_sel))].copy(),
+                _mm_var_sel, _mm_gram_sel, _mm_env_sel,
+            )["Descuento_pct"].mean()
+            _mm_cd1, _mm_cd2 = st.columns(2)
+            with _mm_cd1:
+                _mm_skus_con_of = _mm_of_src[_mm_of_src["En_oferta"]]["SKU_canonico"].nunique()
+                _mm_skus_total = _mm_of_src["SKU_canonico"].nunique()
+                _mm_pct_of_marca = (_mm_skus_con_of / _mm_skus_total * 100) if _mm_skus_total > 0 else 0
+                st.markdown(
+                    f"<div style='background:#FFF7ED;border-radius:10px;padding:0.8rem 1rem;border-left:3px solid #F97316'>"
+                    f"<span style='font-size:0.65rem;text-transform:uppercase;color:#9CA3AF'>% del portfolio con descuento · {_mm_sel}</span><br>"
+                    f"<span style='font-size:1.6rem;font-weight:800;color:#111827'>{_mm_pct_of_marca:.1f}%</span></div>",
+                    unsafe_allow_html=True,
+                )
+            with _mm_cd2:
+                _mm_desc_m = (_mm_of_src[_mm_of_src["En_oferta"]]["Descuento_pct"].mean()
+                              if _mm_of_src["En_oferta"].any() else 0)
+                st.markdown(
+                    f"<div style='background:#F0FDF4;border-radius:10px;padding:0.8rem 1rem;border-left:3px solid #16A34A'>"
+                    f"<span style='font-size:0.65rem;text-transform:uppercase;color:#9CA3AF'>Dto. prom. marca vs mercado</span><br>"
+                    f"<span style='font-size:1.6rem;font-weight:800;color:#111827'>{_mm_desc_m:.0f}% vs {_mm_desc_merc:.0f}%</span></div>",
+                    unsafe_allow_html=True,
+                )
+            st.markdown("<br>", unsafe_allow_html=True)
+            if not _mm_of_tbl.empty:
+                st.dataframe(
+                    _mm_of_tbl,
+                    height=min(400, len(_mm_of_tbl) * 38 + 60),
+                    hide_index=True,
+                    column_config={
+                        "% sem. en oferta": st.column_config.NumberColumn(format="%.1f%%"),
+                        "Dto. prom. (%)": st.column_config.NumberColumn(format="%.0f%%"),
+                    },
+                )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown('<div class="chart-title">📦 Tracking de distribución</div>', unsafe_allow_html=True)
+            _mm_ult_f = df_full["Fecha"].max()
+            _mm_dist_rows = []
+            for (_sku_d, _cad_d), _grp_d in _mm_hist_filtered.groupby(["SKU_canonico", "Cadena"]):
+                _mm_dist_rows.append({
+                    "SKU": _sku_d,
+                    "Cadena": _cad_d,
+                    "Primera vez": _grp_d["Fecha"].min().strftime("%d/%m/%Y"),
+                    "Última vez": _grp_d["Fecha"].max().strftime("%d/%m/%Y"),
+                    "Estado": "✓ Activo" if _grp_d["Fecha"].max() == _mm_ult_f else "✗ Salió",
+                })
+            if _mm_dist_rows:
+                _mm_dist_df = pd.DataFrame(_mm_dist_rows).sort_values(["Estado", "SKU"])
+                st.dataframe(_mm_dist_df, height=min(500, len(_mm_dist_df) * 38 + 60), hide_index=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown('<div class="chart-title">📍 Presencia por cadena — SKU × Cadena</div>', unsafe_allow_html=True)
+            _mm_pres_fechas = sorted(_mm_hist_filtered["Fecha"].unique())
+            _mm_seen_sem = {}
+            for _f in _mm_pres_fechas:
+                _ts = pd.Timestamp(_f)
+                _k = f"Sem {_ts.isocalendar().week} · {_ts.strftime('%b %Y')}"
+                _mm_seen_sem.setdefault(_k, []).append(_f)
+            _mm_per_labels = list(_mm_seen_sem.keys())
+            if _mm_per_labels:
+                _mm_pres_lbl = st.selectbox(
+                    "🗓️ Período a visualizar",
+                    _mm_per_labels,
+                    index=len(_mm_per_labels) - 1,
+                    key="mm_ac_pres_ventana",
+                )
+                _mm_pres_fechas_sel = _mm_seen_sem[_mm_pres_lbl]
+                st.markdown(
+                    f'<div class="chart-note">🟢 activo en al menos 1 scrape de <b>{_mm_pres_lbl}</b> &nbsp;·&nbsp; 🔴 estuvo antes pero no en este período &nbsp;·&nbsp; — nunca en esa cadena.</div>',
+                    unsafe_allow_html=True,
+                )
+                _mm_ventana_df = _mm_hist_filtered[_mm_hist_filtered["Fecha"].isin(_mm_pres_fechas_sel)]
+                _mm_pres_set = set(zip(_mm_ventana_df["SKU_canonico"], _mm_ventana_df["Cadena"]))
+                _mm_todos_skus = sorted(_mm_hist_filtered["SKU_canonico"].unique())
+                _mm_todas_cad = sorted(df_full[df_full["Cadena"].isin(cadenas_sel)]["Cadena"].unique())
+                _mm_hist_set = set(zip(_mm_hist_filtered["SKU_canonico"], _mm_hist_filtered["Cadena"]))
+                _mm_pz, _mm_pt = [], []
+                for _sk in _mm_todos_skus:
+                    _rz, _rt = [], []
+                    for _cd in _mm_todas_cad:
+                        if (_sk, _cd) in _mm_pres_set:
+                            _rz.append(1)
+                            _rt.append("✓")
+                        elif (_sk, _cd) in _mm_hist_set:
+                            _rz.append(-1)
+                            _rt.append("✗")
+                        else:
+                            _rz.append(0)
+                            _rt.append("—")
+                    _mm_pz.append(_rz)
+                    _mm_pt.append(_rt)
+                fig_mm_pres = go.Figure(go.Heatmap(
+                    z=_mm_pz,
+                    x=_mm_todas_cad,
+                    y=_mm_todos_skus,
+                    colorscale=[
+                        [0.00, "#FCA5A5"], [0.33, "#FCA5A5"],
+                        [0.34, "#F3F4F6"], [0.66, "#F3F4F6"],
+                        [0.67, "#86EFAC"], [1.00, "#86EFAC"],
+                    ],
+                    zmin=-1, zmax=1,
+                    text=_mm_pt, texttemplate="%{text}",
+                    textfont=dict(size=13, color="#111827"),
+                    showscale=False, xgap=3, ygap=3,
+                ))
+                fig_mm_pres.update_layout(
+                    **_BASE_CORE,
+                    height=max(220, len(_mm_todos_skus) * 38 + 80),
+                    xaxis=dict(tickfont=dict(size=12, color="#111827"), side="top"),
+                    yaxis=dict(tickfont=dict(size=11, color="#111827")),
+                )
+                st.plotly_chart(fig_mm_pres, use_container_width=True)
