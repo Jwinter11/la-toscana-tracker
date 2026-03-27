@@ -761,6 +761,41 @@ def _parsear_precio_coto(texto: str) -> float | None:
     return None
 
 
+_COTO_STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+Object.defineProperty(navigator, 'language', {get: () => 'es-AR'});
+Object.defineProperty(navigator, 'languages', {get: () => ['es-AR', 'es', 'en-US', 'en']});
+window.chrome = window.chrome || { runtime: {} };
+"""
+
+
+def _abrir_contexto_coto(pw, headless: bool):
+    browser = pw.chromium.launch(headless=headless)
+    context = browser.new_context(
+        viewport={"width": 1400, "height": 1800},
+        user_agent=HEADERS_HTTP["User-Agent"],
+        locale="es-AR",
+    )
+    page = context.new_page()
+    page.add_init_script(_COTO_STEALTH_JS)
+    return browser, context, page
+
+
+def _coto_bloqueado(page, html: str | None = None) -> bool:
+    try:
+        titulo = page.title().lower()
+    except Exception:
+        titulo = ""
+    if "blocked" in titulo:
+        return True
+    contenido = (html or "").lower()
+    return (
+        "web page blocked" in contenido
+        or "url you requested has been blocked" in contenido
+    )
+
+
 def scrape_coto(headless: bool = False) -> list[dict]:
     try:
         from playwright.sync_api import sync_playwright
@@ -772,8 +807,8 @@ def scrape_coto(headless: bool = False) -> list[dict]:
     vistos = set()
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=headless)
-        page = browser.new_page()
+        browser, context, page = _abrir_contexto_coto(pw, headless=headless)
+        relanzado_visible = False
 
         pagina = 1
         while True:
@@ -803,9 +838,34 @@ def scrape_coto(headless: bool = False) -> list[dict]:
                 page.evaluate("window.scrollTo(0, 0)")
                 time.sleep(1.5)
                 html = page.content()
+                if _coto_bloqueado(page, html):
+                    if headless and not relanzado_visible:
+                        print("  [Coto] Bloqueo detectado en headless. Reintentando en visible...")
+                        context.close()
+                        browser.close()
+                        browser, context, page = _abrir_contexto_coto(pw, headless=False)
+                        relanzado_visible = True
+                        continue
+                    print("  [Coto] Bloqueo de seguridad detectado. Abortando scrape.")
+                    break
                 n_items_coto = html.count("producto-card")
+                if n_items_coto == 0 and headless and not relanzado_visible:
+                    print(f"  [Coto] Pag {pagina} vacia en headless. Reintentando en visible...")
+                    context.close()
+                    browser.close()
+                    browser, context, page = _abrir_contexto_coto(pw, headless=False)
+                    relanzado_visible = True
+                    continue
                 print(f"  [Coto] Pag {pagina} cargada ({n_items_coto} cards en HTML)")
             except Exception as e:
+                if headless and not relanzado_visible:
+                    print(f"  [Coto] Headless fallo en pagina {pagina}: {e}")
+                    print("  [Coto] Reintentando en visible...")
+                    context.close()
+                    browser.close()
+                    browser, context, page = _abrir_contexto_coto(pw, headless=False)
+                    relanzado_visible = True
+                    continue
                 print(f"  [Coto] Error en pagina {pagina}: {e}")
                 break
 
@@ -866,6 +926,7 @@ def scrape_coto(headless: bool = False) -> list[dict]:
             pagina += 1
             time.sleep(1.5)
 
+        context.close()
         browser.close()
 
     return productos

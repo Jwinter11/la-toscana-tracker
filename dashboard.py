@@ -2632,17 +2632,11 @@ if _page_sel == "🎯  Mi Marca":
             _mm_dist_src = _mm_dist_src[_mm_dist_src["SKU_canonico"] == _mm_sku_sel]
         _mm_dist_src = _mm_dist_src.copy()
         _mm_ult_f = df_full["Fecha"].max()
-        _mm_cadenas_hoy = set(df_full[df_full["Fecha"] == _mm_ult_f]["Cadena"].unique())
         _mm_dist_rows = []
         for (_sku_d, _cad_d), _grp_d in _mm_dist_src.groupby(["SKU_canonico","Cadena"]):
             _primera = _grp_d["Fecha"].min().strftime("%d/%m/%Y")
             _ultima  = _grp_d["Fecha"].max().strftime("%d/%m/%Y")
-            if _cad_d not in _mm_cadenas_hoy:
-                _activo = "— Sin scrape hoy"
-            elif _grp_d["Fecha"].max() == _mm_ult_f:
-                _activo = "✓ Activo"
-            else:
-                _activo = "✗ Salió"
+            _activo  = "✓ Activo" if _grp_d["Fecha"].max() == _mm_ult_f else "✗ Salió"
             _mm_dist_rows.append({
                 "SKU":          _sku_d,
                 "Cadena":       _cad_d,
@@ -2684,8 +2678,7 @@ if _page_sel == "🎯  Mi Marca":
             st.markdown(
                 f'<div class="chart-note">'
                 f'🟢 activo en al menos 1 scrape de <b>{_mm_pres_lbl}</b> &nbsp;·&nbsp; '
-                f'🔴 estuvo antes pero no en este período, con scrape válido de la cadena &nbsp;·&nbsp; '
-                f'— sin scrape del período o nunca en esa cadena.'
+                f'🔴 estuvo antes pero no en este período &nbsp;·&nbsp; — nunca en esa cadena.'
                 f'</div>',
                 unsafe_allow_html=True)
             _mm_ventana_df  = _mm_pres_src[_mm_pres_src["Fecha"].isin(_mm_pres_fechas_sel)]
@@ -2693,15 +2686,12 @@ if _page_sel == "🎯  Mi Marca":
             _mm_todos_skus  = sorted(_mm_pres_src["SKU_canonico"].unique())
             _mm_todas_cad   = sorted(df_full["Cadena"].unique())
             _mm_hist_set    = set(zip(_mm_pres_src["SKU_canonico"], _mm_pres_src["Cadena"]))
-            _mm_cadenas_scrapeadas = set(df_full[df_full["Fecha"].isin(_mm_pres_fechas_sel)]["Cadena"].unique())
             _mm_pz, _mm_pt = [], []
             for _sk in _mm_todos_skus:
                 _rz, _rt = [], []
                 for _cd in _mm_todas_cad:
                     if (_sk, _cd) in _mm_pres_set:
                         _rz.append(1);  _rt.append("✓")
-                    elif _cd not in _mm_cadenas_scrapeadas:
-                        _rz.append(0);  _rt.append("—")
                     elif (_sk, _cd) in _mm_hist_set:
                         _rz.append(-1); _rt.append("✗")
                     else:
@@ -2910,8 +2900,7 @@ if _page_sel == "📦  Quiebres":
         st.markdown(
             f'<div class="chart-note">'
             f'🟢 activo en al menos 1 scrape de <b>{_pres_sel_lbl}</b> &nbsp;·&nbsp; '
-            f'🔴 estuvo antes pero no en este período, con scrape válido de la cadena &nbsp;·&nbsp; '
-            f'— sin scrape del período o nunca en esa cadena.'
+            f'🔴 estuvo antes pero no en este período &nbsp;·&nbsp; — nunca en esa cadena.'
             f'</div>',
             unsafe_allow_html=True)
 
@@ -2924,7 +2913,6 @@ if _page_sel == "📦  Quiebres":
         _qb_todas_cad  = sorted(df_full["Cadena"].unique())
         # Combinaciones que alguna vez existieron (para distinguir rojo de gris)
         _qb_historial_set = set(zip(_qb_src_marca["SKU_canonico"], _qb_src_marca["Cadena"]))
-        _qb_cadenas_scrapeadas = set(df_full[df_full["Fecha"].isin(_pres_fechas_sel)]["Cadena"].unique())
 
         _qb_z, _qb_txt = [], []
         for _sk in _qb_todos_skus:
@@ -2932,8 +2920,6 @@ if _page_sel == "📦  Quiebres":
             for _cd in _qb_todas_cad:
                 if (_sk, _cd) in _qb_pres_set:
                     _row_z.append(1); _row_t.append("✓")
-                elif _cd not in _qb_cadenas_scrapeadas:
-                    _row_z.append(0); _row_t.append("—")
                 elif (_sk, _cd) in _qb_historial_set:
                     _row_z.append(-1); _row_t.append("✗")
                 else:
