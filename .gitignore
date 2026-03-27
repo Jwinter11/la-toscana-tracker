@@ -11,6 +11,7 @@ __pycache__/
 *.txt
 !requirements.txt
 scraper*.py
+!scraper_aceitunas.py
 abrir_dashboard.bat
 config.txt
 debug_*.html
