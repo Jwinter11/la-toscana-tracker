@@ -2481,11 +2481,11 @@ if active_page == "Mi Marca":
                     st.plotly_chart(fig_mm_bar, use_container_width=True)
 
             with st.expander("🏪 Presencia por cadena", expanded=True):
-                _mm_heat_src, _, _ = preparar_metrica_mi_marca_ac(_mm_dff, _mm_mode)
-                _mm_pres_piv = (_mm_heat_src.groupby(["SKU_canonico", "Cadena"])["_mm_metric"]
+                _mm_heat_src = _mm_dff.dropna(subset=["Precio"]).copy()
+                _mm_pres_piv = (_mm_heat_src.groupby(["SKU_canonico", "Cadena"])["Precio"]
                                 .mean().round(0).unstack("Cadena"))
                 if not _mm_pres_piv.empty:
-                    _mm_text = [[_mm_fmt(v) if not pd.isna(v) else "—" for v in row]
+                    _mm_text = [[f"${v:,.0f}" if not pd.isna(v) else "—" for v in row]
                                 for row in _mm_pres_piv.values]
                     fig_mm_h = go.Figure(go.Heatmap(
                         z=_mm_pres_piv.values,
@@ -2495,7 +2495,7 @@ if active_page == "Mi Marca":
                         text=_mm_text,
                         texttemplate="%{text}",
                         textfont=dict(size=12, color="#111827"),
-                        colorbar=dict(title=_mm_metric_axis, tickprefix="$", tickformat=",",
+                        colorbar=dict(title="Precio góndola", tickprefix="$", tickformat=",",
                                       tickfont=dict(color="#111827"),
                                       title_font=dict(color="#111827")),
                     ))
