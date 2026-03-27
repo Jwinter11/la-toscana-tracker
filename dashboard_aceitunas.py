@@ -1383,7 +1383,7 @@ if active_page == "Resumen":
               <div style="font-size:0.71rem;color:#374151;line-height:1.4">{detalle}</div>
             </div>""", unsafe_allow_html=True)
 
-        _ins = dff.copy()
+        _ins = dff[dff["Fecha"] == dff["Fecha"].max()].copy()
         _ins_g = _ins.dropna(subset=["Precio_100g"])
         _cad_p100 = (_ins_g.groupby(["Cadena", "SKU_canonico"])["Precio_100g"].mean()
                      .reset_index().groupby("Cadena")["Precio_100g"].mean().reset_index(name="p100"))
@@ -1394,12 +1394,12 @@ if active_page == "Resumen":
                         .reset_index(name="n").sort_values("n", ascending=False))
         _cad_x_marca = (_ins_marcas.groupby("Marca")["Cadena"].nunique()
                         .reset_index(name="n").sort_values("n", ascending=False))
-        _of_x_cad = (df_full[df_full["Cadena"].isin(cadenas_sel)]
+        _of_x_cad = (_ins[_ins["Cadena"].isin(cadenas_sel)]
                      .groupby("Cadena")["En_oferta"].mean().mul(100)
                      .reset_index(name="pct").sort_values("pct", ascending=False))
-        _of_x_marca = (df_full[
-                           df_full["Cadena"].isin(cadenas_sel)
-                           & df_full["Marca"].isin(MARCAS_DESTACADAS_AC)
+        _of_x_marca = (_ins[
+                           _ins["Cadena"].isin(cadenas_sel)
+                           & _ins["Marca"].isin(MARCAS_DESTACADAS_AC)
                        ]
                        .groupby("Marca")["En_oferta"].mean().mul(100)
                        .reset_index(name="pct").sort_values("pct", ascending=False))
