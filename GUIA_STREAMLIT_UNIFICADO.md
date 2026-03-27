@@ -29,7 +29,7 @@ PASSWORD = "tu_password"
 1. `actualizar_todo_diario.bat` corre `scraper.py --auto`.
 2. Después corre `scraper_aceitunas.py --auto`.
 3. Ambos usan `ACEITE_TRACKER_HEADLESS=1`, así que Playwright ya puede correr sin navegador visible.
-4. Si hay cambios, el script hace `git add`, `git commit` y `git push origin main`.
+4. Si hay cambios, el script hace `git add`, `git commit` y `git push latoscana main`.
 5. Streamlit detecta el push y redeploya la app unificada.
 
 ## Cómo instalar la tarea diaria

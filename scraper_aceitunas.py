@@ -21,6 +21,10 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="repla
 import requests
 from bs4 import BeautifulSoup
 
+from aceitunas_catalogo_manual import (
+    buscar_gramaje_unificado_catalogo,
+    gramaje_a_grupo_aceituna,
+)
 from tracker_paths import precios_db_path
 
 # ---------------------------------------------------------------------------
@@ -124,7 +128,7 @@ def precio_ac_valido(precio: float) -> bool:
 _VARIEDADES_PATS_RAW: list[tuple[str, str, str]] = [
     # (pattern, variedad_canonical, confianza)
     # Negras primero
-    (r"negra[s]?\s+des?carozada[s]?",          "Negra Descarozada",    "alta"),
+    (r"negra[s]?\s+des?carozada[s]?|negra[s]?\s+descor\b", "Negra Descarozada", "alta"),
     (r"negra[s]?\s+(?:en\s+)?rodaja[ds]?a?[s]?", "Negra Rodajada",       "alta"),
     (r"negra[s]?\s+rellena[s]?",                "Negra Rellena",        "alta"),
     (r"kalamata",                                "Kalamata",             "alta"),
@@ -138,9 +142,9 @@ _VARIEDADES_PATS_RAW: list[tuple[str, str, str]] = [
     # Verdes con características
     (r"(?:con\s+)?ajo\b",                        "Verde con Ajo",        "alta"),
     (r"picante[s]?",                             "Verde Picante",        "alta"),
-    (r"ahumada[s]?",                             "Verde Ahumada",        "alta"),
+    (r"ahumad[ao]s?",                            "Verde Ahumada",        "alta"),
     (r"(?:en\s+)?rodaja[ds]?a?[s]?",             "Verde Rodajada",       "alta"),
-    (r"des?carozada[s]?",                        "Verde Descarozada",    "alta"),
+    (r"des?carozada[s]?|descor\b",               "Verde Descarozada",    "alta"),
     (r"saborizada[s]?",                          "Verde Saborizada",     "alta"),
     # Mix
     (r"mix\b|mixta[s]?\b|combinad[ao]|surtid[ao]|variedad", "Mix",      "alta"),
@@ -451,6 +455,34 @@ def precio_por_100g(precio: float, gramos: int | None) -> int | None:
     if gramos and gramos > 0:
         return round(precio / gramos * 100)
     return None
+
+
+def aplicar_catalogo_gramajes(productos: list[dict]) -> list[dict]:
+    ajustados: list[dict] = []
+    for p in productos:
+        g_actual = p.get("gramos_sin_escurrir")
+        g_unificado = buscar_gramaje_unificado_catalogo(
+            p.get("supermercado", ""),
+            p.get("nombre", ""),
+            p.get("producto_id"),
+            p.get("marca", ""),
+            p.get("variedad", ""),
+            g_actual,
+        )
+        if not g_unificado or g_unificado == g_actual:
+            ajustados.append(p)
+            continue
+
+        nuevo = dict(p)
+        nuevo["gramos_sin_escurrir"] = g_unificado
+        nuevo["gramaje_fuente"] = "catalogo"
+        nuevo["gramaje_confianza"] = "alta"
+        nuevo["precio_100g"] = precio_por_100g(nuevo["precio"], g_unificado)
+        if nuevo.get("precio_sin_dto"):
+            nuevo["precio_sin_dto_100g"] = precio_por_100g(nuevo["precio_sin_dto"], g_unificado)
+        nuevo["gramaje_grupo"] = gramaje_a_grupo_aceituna(g_unificado)
+        ajustados.append(nuevo)
+    return ajustados
 
 
 # ---------------------------------------------------------------------------
@@ -1588,6 +1620,7 @@ def unificar_gramajes(productos: list[dict]) -> list[dict]:
     """
     Dentro de cada combinación (marca, variedad), unifica gramajes que difieren
     ≤20g al valor más redondo del cluster.
+    Respeta los gramajes fijados por catÃ¡logo o verificaciÃ³n manual.
     Si quedan >4 gramajes distintos por grupo, muestra advertencia para revisar.
     Recalcula precio_100g con los gramajes unificados.
     """
@@ -1595,10 +1628,14 @@ def unificar_gramajes(productos: list[dict]) -> list[dict]:
 
     # Agrupar valores de gramaje por (marca, variedad)
     grupos: dict[tuple, list[int]] = defaultdict(list)
+    fijos: dict[tuple, set[int]] = defaultdict(set)
     for p in productos:
         g = p.get("gramos_sin_escurrir")
         if g:
-            grupos[(p.get("marca", ""), p.get("variedad", ""))].append(g)
+            clave = (p.get("marca", ""), p.get("variedad", ""))
+            grupos[clave].append(g)
+            if p.get("gramaje_fuente") in {"manual", "catalogo"}:
+                fijos[clave].add(g)
 
     # Para cada grupo construir mapa {gramaje_original → gramaje_unificado}
     mapas: dict[tuple, dict[int, int]] = {}
@@ -1609,17 +1646,31 @@ def unificar_gramajes(productos: list[dict]) -> list[dict]:
             continue
 
         # Clustering greedy: agrupa valores consecutivos con diferencia ≤20g
+        anclas = sorted(fijos.get(clave, set()))
         clusters: list[list[int]] = []
-        cluster_actual = [valores[0]]
-        for g in valores[1:]:
-            if g - cluster_actual[-1] <= 20:
-                cluster_actual.append(g)
-            else:
-                clusters.append(cluster_actual)
-                cluster_actual = [g]
-        clusters.append(cluster_actual)
-
         mapa: dict[int, int] = {}
+        libres: list[int] = []
+        for g in valores:
+            if g in anclas:
+                mapa[g] = g
+                continue
+            candidatos = [a for a in anclas if abs(a - g) <= 20]
+            if candidatos:
+                rep = min(candidatos, key=lambda a: (abs(a - g), -_redondez(a), a))
+                mapa[g] = rep
+            else:
+                libres.append(g)
+
+        if libres:
+            cluster_actual = [libres[0]]
+            for g in libres[1:]:
+                if g - cluster_actual[-1] <= 20:
+                    cluster_actual.append(g)
+                else:
+                    clusters.append(cluster_actual)
+                    cluster_actual = [g]
+            clusters.append(cluster_actual)
+
         for cluster in clusters:
             rep = _mas_redondo(cluster)
             for g in cluster:
@@ -1710,6 +1761,7 @@ def main():
         return
 
     todos = analizar_calidad_aceitunas(todos)
+    todos = aplicar_catalogo_gramajes(todos)
     todos = unificar_gramajes(todos)
 
     fecha_hoy = str(date.today())
@@ -1736,7 +1788,8 @@ def main():
             })
         todos_con_overrides.append({**p, **cambios} if cambios else p)
     conn_pre.close()
-    todos = unificar_gramajes(todos_con_overrides)
+    todos = aplicar_catalogo_gramajes(todos_con_overrides)
+    todos = unificar_gramajes(todos)
 
     guardar_en_sqlite_aceitunas(todos, fecha_hoy)
     print(f"\nGuardado: {len(todos)} registros para {fecha_hoy}")
@@ -1769,6 +1822,7 @@ def main():
                     "gramaje_confianza":   "alta",
                 })
             todos_final.append({**p, **cambios2} if cambios2 else p)
+        todos_final = aplicar_catalogo_gramajes(todos_final)
         todos_final = unificar_gramajes(todos_final)
         guardar_en_sqlite_aceitunas(todos_final, fecha_hoy)
         print(f"{guardados} gramajes verificados y aplicados.")

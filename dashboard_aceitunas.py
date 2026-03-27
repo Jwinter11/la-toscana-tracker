@@ -17,6 +17,13 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
+from aceitunas_catalogo_manual import (
+    ENVASES_VALIDOS,
+    buscar_gramaje_unificado_catalogo,
+    gramaje_a_grupo_aceituna,
+    gramaje_grupo_label_aceituna,
+    resolver_envase_catalogo,
+)
 from dashboard_unificado_helpers import (
     render_sidebar_section_switcher,
     unified_mode_enabled,
@@ -145,6 +152,34 @@ def categorizar_marca_ac(marca: str) -> str:
 # Variedades unificadas
 # ---------------------------------------------------------------------------
 
+_VARIEDAD_REGLAS_DASH_AC: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"negra[s]?\s+descor\b|negra[s]?\s+des?carozada[s]?", re.IGNORECASE), "Negra Descarozada"),
+    (re.compile(r"negra[s]?\s+(?:en\s+)?rodaj", re.IGNORECASE), "Negra Rodajada"),
+    (re.compile(r"negra[s]?", re.IGNORECASE), "Negra"),
+    (re.compile(r"rellena[s]?\s+(?:con\s+)?queso", re.IGNORECASE), "Verde Rellena Queso"),
+    (re.compile(r"rellena[s]?\s+(?:con\s+)?salmon", re.IGNORECASE), "Verde Rellena Salmón"),
+    (re.compile(r"rellena[s]?\s+(?:con\s+)?anchoa[s]?", re.IGNORECASE), "Verde Rellena Anchoas"),
+    (re.compile(r"rellena[s]?\s+(?:con\s+)?morron(?:es)?", re.IGNORECASE), "Verde Rellena Morrón"),
+    (re.compile(r"rellena[s]?", re.IGNORECASE), "Verde Rellena Morrón"),
+    (re.compile(r"(?:con\s+)?ajo\b", re.IGNORECASE), "Verde con Ajo"),
+    (re.compile(r"picante[s]?", re.IGNORECASE), "Verde Picante"),
+    (re.compile(r"ahumad[ao]s?", re.IGNORECASE), "Verde Ahumada"),
+    (re.compile(r"(?:en\s+)?rodaj", re.IGNORECASE), "Verde Rodajada"),
+    (re.compile(r"des?carozada[s]?|descor\b", re.IGNORECASE), "Verde Descarozada"),
+    (re.compile(r"saborizada[s]?", re.IGNORECASE), "Verde Saborizada"),
+    (re.compile(r"kalamata", re.IGNORECASE), "Kalamata"),
+    (re.compile(r"mix\b|mixta[s]?\b|combinad[ao]|surtid[ao]|variedad", re.IGNORECASE), "Mix"),
+]
+
+
+def ajustar_variedad_raw_ac(nombre: str, variedad_actual: str | None) -> str:
+    actual = variedad_actual or "Verde"
+    for patron, variedad in _VARIEDAD_REGLAS_DASH_AC:
+        if patron.search(_normalizar_ac(nombre)):
+            return variedad
+    return actual
+
+
 def unificar_variedad(v: str | None) -> str:
     if v is None:
         return "Verde con carozo"
@@ -189,7 +224,7 @@ GRAMAJE_GRUPOS_LABELS = {
 }
 
 
-def gramaje_grupo_label(g): return GRAMAJE_GRUPOS_LABELS.get(g, g or "Sin gramaje")
+def gramaje_grupo_label(g): return gramaje_grupo_label_aceituna(g)
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +300,33 @@ def cm(m): return COLORES_MARCA_AC.get(m, "#9CA3AF")
 
 
 def sku_canonico_ac(marca: str, variedad: str, gramos, envase: str | None = None) -> str:
+    if marca == "Castell":
+        v = (variedad or "").strip()
+        if "Ahumad" in v:
+            base = "Verde Ahumada"
+        elif "Picante" in v:
+            base = "Verde Picante"
+        elif "Ajo" in v:
+            base = "Verde con Ajo"
+        elif "Rellena" in v:
+            base = "Verde Rellena"
+        elif "Rodajada" in v:
+            base = "Verde Rodajada"
+        elif "Descarozada" in v:
+            base = "Verde Descarozada"
+        elif "Negra" in v:
+            base = "Negra"
+        else:
+            base = "Verde con carozo"
+        grupo = gramaje_grupo_label(gramaje_a_grupo_aceituna(gramos))
+        marca_lbl = "Castell Premium" if envase == "Frasco Premium" else "Castell"
+        partes = [marca_lbl, base]
+        if grupo != "Sin gramaje":
+            partes.append(grupo)
+        if envase and envase != "Sin detectar":
+            partes.append(envase)
+        return " · ".join(partes)
+
     g_lbl = f"{int(gramos)}g" if gramos and not pd.isna(gramos) else "?"
     partes = [marca, variedad, g_lbl]
     if envase and envase != "Sin detectar":
@@ -275,6 +337,56 @@ def sku_canonico_ac(marca: str, variedad: str, gramos, envase: str | None = None
 # ---------------------------------------------------------------------------
 # Configuración de página
 # ---------------------------------------------------------------------------
+
+def completar_envase_por_familia(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "Envase" not in df.columns:
+        return df
+
+    base = df[
+        df["Envase"].isin(ENVASES_VALIDOS)
+        & df["Gramos"].notna()
+        & df["Variedad_raw"].notna()
+    ].copy()
+    if base.empty:
+        return df
+
+    base["Gramos"] = base["Gramos"].astype(int)
+    conteos = (
+        base.groupby(["Marca", "Variedad_raw", "Gramos", "Envase"])
+        .size()
+        .reset_index(name="n")
+    )
+
+    mapa_familia: dict[tuple[str, str, int], str] = {}
+    for (marca, variedad, gramos), grp in conteos.groupby(["Marca", "Variedad_raw", "Gramos"]):
+        grp = grp.sort_values(["n", "Envase"], ascending=[False, True]).reset_index(drop=True)
+        if len(grp) == 1 or grp.loc[0, "n"] >= grp.loc[1, "n"] * 2:
+            mapa_familia[(marca, variedad, int(gramos))] = grp.loc[0, "Envase"]
+
+    if not mapa_familia:
+        return df
+
+    df = df.copy()
+    mask = (
+        df["Envase"].eq("Sin detectar")
+        & df["Gramos"].notna()
+        & df["Variedad_raw"].notna()
+    )
+    if not mask.any():
+        return df
+
+    for idx in df.index[mask]:
+        key = (
+            df.at[idx, "Marca"],
+            df.at[idx, "Variedad_raw"],
+            int(df.at[idx, "Gramos"]),
+        )
+        envase = mapa_familia.get(key)
+        if envase:
+            df.at[idx, "Envase"] = envase
+
+    return df
+
 
 if not UNIFIED_MODE:
     st.set_page_config(
@@ -717,29 +829,35 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
     for r in registros:
         if not es_producto_aceituna(r["nombre"]):
             continue
-        g       = r["gramos_sin_escurrir"]
+        cadena  = r["supermercado"]
+        marca   = limpiar_marca_ac(r["marca"] or "Desconocida", cadena)
+        var_raw = ajustar_variedad_raw_ac(r["nombre"] or "", r["variedad"] or "Verde")
+        g       = buscar_gramaje_unificado_catalogo(
+            cadena,
+            r["nombre"] or "",
+            r["producto_id"],
+            marca,
+            var_raw,
+            r["gramos_sin_escurrir"],
+        )
         precio  = r["precio"]
         gondola = r["precio_sin_dto"] or precio
         desc    = round((gondola - precio) / gondola * 100) if gondola > precio else 0
-        cadena  = r["supermercado"]
-        marca   = limpiar_marca_ac(r["marca"] or "Desconocida", cadena)
-        var_raw = r["variedad"] or "Verde"
         var_unif = unificar_variedad(var_raw)
         marca_cat = categorizar_marca_ac(marca)
-        envase = detectar_envase_nombre(r["nombre"] or "")
-        sku_var = var_raw or var_unif
+        envase_base = detectar_envase_nombre(r["nombre"] or "")
+        envase = resolver_envase_catalogo(cadena, r["nombre"] or "", marca, var_raw, g, envase_base)
         rows.append({
             "Fecha":              r["fecha"],
             "Cadena":             r["supermercado"],
             "Marca":              marca,
             "Marca_cat":          marca_cat,
             "Producto":           r["nombre"],
-            "SKU_canonico":       sku_canonico_ac(marca, sku_var, g, envase),
             "Variedad":           var_unif,
             "Variedad_raw":       var_raw,
             "Variedad_conf":      r["variedad_confianza"] or "baja",
             "Gramos":             int(g) if g else None,
-            "Gramaje":            r["gramaje_grupo"],
+            "Gramaje":            gramaje_a_grupo_aceituna(g),
             "Gramos_escurrido":   r["gramos_escurrido"],
             "Gramaje_fuente":     r["gramaje_fuente"] or "unknown",
             "Gramaje_conf":       r["gramaje_confianza"] or "baja",
@@ -756,6 +874,16 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     if not df.empty:
+        df = completar_envase_por_familia(df)
+        df["SKU_canonico"] = df.apply(
+            lambda row: sku_canonico_ac(
+                row["Marca"],
+                row["Variedad_raw"] or row["Variedad"],
+                row["Gramos"],
+                row["Envase"],
+            ),
+            axis=1,
+        )
         df["Fecha"] = pd.to_datetime(df["Fecha"]).dt.normalize()   # normalizar a medianoche
         df["Semana_num"] = df["Fecha"].dt.isocalendar().week.astype(int)
         df["Periodo"] = df["Fecha"].apply(
@@ -975,7 +1103,7 @@ cadenas_sel     = list(cadenas_disp)
 grupos_disp     = [g for g in GRAMAJE_GRUPOS if df_full["Gramaje"].eq(g).any()]
 grupos_labels   = [gramaje_grupo_label(g) for g in grupos_disp]
 buckets_sel     = list(grupos_disp)
-_envases_orden  = ["Doypack", "Frasco", "Lata", "Bandeja", "Sin detectar"]
+_envases_orden  = ["Doypack", "Frasco Premium", "Frasco", "Lata", "Bandeja", "Sin detectar"]
 envases_disp    = [e for e in _envases_orden if (df_full["Envase"] == e).any()]
 envases_sel     = list(envases_disp)
 metrica_sel     = "Precio góndola ($)"

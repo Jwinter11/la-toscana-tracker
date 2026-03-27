@@ -6,6 +6,7 @@ set "ROOT=%CD%"
 set "PYTHON_EXE=C:\Users\Julian\AppData\Local\Python\pythoncore-3.14-64\python.exe"
 set "LOG=%ROOT%\logs_automatizacion_diaria.txt"
 set "ACEITE_TRACKER_HEADLESS=1"
+set "GIT_REMOTE=latoscana"
 
 echo [%date% %time%] Inicio de actualizacion diaria >> "%LOG%"
 
@@ -31,7 +32,7 @@ if errorlevel 1 (
     goto :ok
 )
 
-git push origin main >> "%LOG%" 2>&1
+git push %GIT_REMOTE% main >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo [%date% %time%] ERROR: git push fallo >> "%LOG%"
     exit /b 1
