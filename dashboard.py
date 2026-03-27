@@ -15,7 +15,31 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from dashboard_unificado_helpers import (
+    render_sidebar_section_switcher,
+    unified_mode_enabled,
+)
+from tracker_paths import historial_path, precios_db_path
+
 DIRECTORIO = Path(__file__).parent
+DB_PATH = precios_db_path()
+HISTORIAL_PATH = historial_path()
+UNIFIED_MODE = unified_mode_enabled()
+
+_PALABRAS_EXCLUIR_PRODUCTO = [
+    "mayonesa", "hummus", "vinagre", "aderezo", "salsa", "pesto",
+    "aceituna", "girasol", "maiz", "maíz", "soja", "canola", "spray",
+    "atun", "atún", "papa", "papas",
+]
+
+
+def es_producto_aceite_oliva(nombre: str) -> bool:
+    n = (nombre or "").lower()
+    if "oliva" not in n or "aceite" not in n:
+        return False
+    if any(p in n for p in _PALABRAS_EXCLUIR_PRODUCTO):
+        return False
+    return True
 
 # ── Marcas ────────────────────────────────────────────────────────────────
 MARCAS_DESTACADAS = {"La Toscana","Zuelo","Oliovita","Natura","Nucete","Cocinero","Lira"}
@@ -131,8 +155,9 @@ def canonicalizar_sku(marca_raw: str, nombre: str, ml) -> str:
     return " ".join(parts)
 
 # ── Configuración página ──────────────────────────────────────────────────
-st.set_page_config(page_title="Aceite Tracker | Monitor de Precios",
-                   page_icon="🫒", layout="wide", initial_sidebar_state="expanded")
+if not UNIFIED_MODE:
+    st.set_page_config(page_title="Aceite Tracker | Monitor de Precios",
+                       page_icon="🫒", layout="wide", initial_sidebar_state="expanded")
 
 # ── Protección por contraseña ─────────────────────────────────────────────
 _MAX_INTENTOS = 5
@@ -195,6 +220,8 @@ def _check_password():
       <div class="login-subtitle">Ingresá la contraseña para continuar</div>
     </div>
     """, unsafe_allow_html=True)
+    if DB_PATH != DIRECTORIO / "precios.db" or HISTORIAL_PATH != DIRECTORIO / "historial_precios.json":
+        st.caption(f"Modo copia · DB: {DB_PATH.name}")
     _, col, _ = st.columns([2, 1.5, 2])
     with col:
         st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
@@ -215,7 +242,8 @@ def _check_password():
                     st.rerun()
     st.stop()
 
-_check_password()
+if not UNIFIED_MODE:
+    _check_password()
 
 st.markdown("""
 <style>
@@ -622,11 +650,9 @@ def _marca(nombre: str, guardada) -> str:
 
 # ── Carga de datos ────────────────────────────────────────────────────────
 def _historial_mtime():
-    db = DIRECTORIO / "precios.db"
-    if db.exists():
-        return db.stat().st_mtime
-    p = DIRECTORIO / "historial_precios.json"
-    return p.stat().st_mtime if p.exists() else 0
+    if DB_PATH.exists():
+        return DB_PATH.stat().st_mtime
+    return HISTORIAL_PATH.stat().st_mtime if HISTORIAL_PATH.exists() else 0
 
 _URL_BASE_CADENA = {
     "Carrefour":   "https://www.carrefour.com.ar",
@@ -656,17 +682,18 @@ def _build_url(superm: str, pid: str, nombre: str) -> str | None:
 @st.cache_data(ttl=3600, hash_funcs={})
 def cargar_datos(_mtime=None) -> pd.DataFrame:
     import sqlite3
-    db = DIRECTORIO / "precios.db"
     rows = []
 
-    if db.exists():
-        conn = sqlite3.connect(db)
+    if DB_PATH.exists():
+        conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("SELECT * FROM precios ORDER BY fecha")
         registros = cur.fetchall()
         conn.close()
         for r in registros:
+            if not es_producto_aceite_oliva(r["nombre"]):
+                continue
             fecha   = r["fecha"]
             ml      = r["ml"]
             precio  = r["precio"]
@@ -695,14 +722,15 @@ def cargar_datos(_mtime=None) -> pd.DataFrame:
                 "Producto_url":  prod_url,
             })
     else:
-        path = DIRECTORIO / "historial_precios.json"
-        if not path.exists():
+        if not HISTORIAL_PATH.exists():
             return pd.DataFrame()
-        with open(path, encoding="utf-8") as f:
+        with open(HISTORIAL_PATH, encoding="utf-8") as f:
             hist = json.load(f)
         for sem in hist.get("semanas", []):
             fecha = sem["fecha"]
             for p in sem.get("productos", []):
+                if not es_producto_aceite_oliva(p["nombre"]):
+                    continue
                 ml      = p.get("ml")
                 precio  = p["precio"]
                 gondola = p.get("precio_sin_dto") or precio
@@ -787,12 +815,14 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="sidebar-sep">Navegación</div>', unsafe_allow_html=True)
+    if DB_PATH != DIRECTORIO / "precios.db" or HISTORIAL_PATH != DIRECTORIO / "historial_precios.json":
+        st.caption(f"Modo copia · DB: {DB_PATH.name}")
     _page_sel = st.radio(
         "Navegación",
         ["📊  Resumen", "🏪  Por Cadena", "🏷️  Por Marca",
          "📈  Evolución", "🔖  Ofertas", "⚖️  Comparativa",
          "🎯  Mi Marca", "📦  Quiebres", "🔢  Tabla dinámica"],
-        key="nav_radio",
+        key="nav_radio_aceite" if UNIFIED_MODE else "nav_radio",
         label_visibility="collapsed",
     )
     active_page = _page_sel.split("  ", 1)[1].strip() if "  " in _page_sel else _page_sel.strip()
@@ -814,8 +844,14 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-    st.markdown('<div class="sidebar-sep">Otras categorías</div>', unsafe_allow_html=True)
-    _comp_ui.html("""
+    st.markdown(
+        f'<div class="sidebar-sep">{"Cambiar sección" if UNIFIED_MODE else "Otras categorías"}</div>',
+        unsafe_allow_html=True,
+    )
+    if UNIFIED_MODE:
+        render_sidebar_section_switcher("aceite", key_prefix="suite_nav_aceite")
+    else:
+        _comp_ui.html("""
 <style>
   body{margin:0;padding:0;background:transparent;font-family:'Montserrat',sans-serif}
   a.csb{

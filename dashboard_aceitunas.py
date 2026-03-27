@@ -8,6 +8,7 @@ Uso: streamlit run dashboard_aceitunas.py --server.port 8502
 import math
 import re
 import sqlite3
+import unicodedata
 from pathlib import Path
 
 import pandas as pd
@@ -16,7 +17,46 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
+from dashboard_unificado_helpers import (
+    render_sidebar_section_switcher,
+    unified_mode_enabled,
+)
+from tracker_paths import precios_db_path
+
 DIRECTORIO = Path(__file__).parent
+DB_PATH = precios_db_path()
+UNIFIED_MODE = unified_mode_enabled()
+
+_PALABRAS_EXCLUIR_DASH_AC = [
+    "empanada", "pizza", "relleno para",
+    "pasta de aceituna", "pasta aceitunas", "pasta de aceitunas",
+    "tapenade", "paté de", "pate de", "pasta para untar",
+    "aceite de oliva", "aceite oliva",
+    "sandwich", "sandwiche", "sándwich",
+    "ciabata", "ciabatta",
+]
+
+
+def _normalizar_ac(texto: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", (texto or "").lower())
+        if not unicodedata.combining(c)
+    )
+
+
+def es_producto_aceituna(nombre: str) -> bool:
+    n = _normalizar_ac(nombre)
+    m_ac = re.search(r"aceitun[ao]", n)
+    if not m_ac:
+        return False
+    m_q = re.search(r"\bqueso\b", n)
+    if m_q and m_q.start() < m_ac.start():
+        return False
+    if re.match(r"pasta\b", n):
+        return False
+    if any(_normalizar_ac(excl) in n for excl in _PALABRAS_EXCLUIR_DASH_AC):
+        return False
+    return True
 
 # ---------------------------------------------------------------------------
 # Marcas
@@ -44,6 +84,8 @@ ORDEN_MARCAS_AC = [
     "Castell", "Nucete", "La Toscana", "Morixe", "Oliovita", "Vanoli",
     "Marca Propia", "Otras",
 ]
+
+_MARCAS_AGREGADAS_EXCLUIDAS_AC = {"Otras", "Marca Propia", "Desconocida", "", None}
 
 
 # Correcciones directas: DB tiene un nombre incorrecto → nombre real
@@ -222,19 +264,23 @@ def cv(v): return COLORES_VARIEDAD.get(v, "#9CA3AF")
 def cm(m): return COLORES_MARCA_AC.get(m, "#9CA3AF")
 
 
-def sku_canonico_ac(marca: str, variedad: str, gramos) -> str:
+def sku_canonico_ac(marca: str, variedad: str, gramos, envase: str | None = None) -> str:
     g_lbl = f"{int(gramos)}g" if gramos and not pd.isna(gramos) else "?"
-    return f"{marca} · {variedad} · {g_lbl}"
+    partes = [marca, variedad, g_lbl]
+    if envase and envase != "Sin detectar":
+        partes.append(envase)
+    return " · ".join(partes)
 
 
 # ---------------------------------------------------------------------------
 # Configuración de página
 # ---------------------------------------------------------------------------
 
-st.set_page_config(
-    page_title="Aceitunas Tracker | Monitor de Precios",
-    page_icon="🫒", layout="wide", initial_sidebar_state="expanded",
-)
+if not UNIFIED_MODE:
+    st.set_page_config(
+        page_title="Aceitunas Tracker | Monitor de Precios",
+        page_icon="🫒", layout="wide", initial_sidebar_state="expanded",
+    )
 
 # ---------------------------------------------------------------------------
 # Contraseña
@@ -258,6 +304,8 @@ def _check_password():
       <div style="font-size:0.9rem;color:#6B7280">Ingresá la contraseña para continuar</div>
     </div>
     """, unsafe_allow_html=True)
+    if DB_PATH != DIRECTORIO / "precios.db":
+        st.caption(f"Modo copia · DB: {DB_PATH.name}")
     _, col, _ = st.columns([2, 1.5, 2])
     with col:
         pwd = st.text_input("Contraseña", type="password",
@@ -278,7 +326,8 @@ def _check_password():
     st.stop()
 
 
-_check_password()
+if not UNIFIED_MODE:
+    _check_password()
 
 # ---------------------------------------------------------------------------
 # CSS
@@ -645,9 +694,6 @@ components.html("""
 # Carga de datos
 # ---------------------------------------------------------------------------
 
-DB_PATH = DIRECTORIO / "precios.db"
-
-
 def _db_mtime():
     return DB_PATH.stat().st_mtime if DB_PATH.exists() else 0
 
@@ -669,6 +715,8 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
 
     rows = []
     for r in registros:
+        if not es_producto_aceituna(r["nombre"]):
+            continue
         g       = r["gramos_sin_escurrir"]
         precio  = r["precio"]
         gondola = r["precio_sin_dto"] or precio
@@ -678,13 +726,15 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
         var_raw = r["variedad"] or "Verde"
         var_unif = unificar_variedad(var_raw)
         marca_cat = categorizar_marca_ac(marca)
+        envase = detectar_envase_nombre(r["nombre"] or "")
+        sku_var = var_raw or var_unif
         rows.append({
             "Fecha":              r["fecha"],
             "Cadena":             r["supermercado"],
             "Marca":              marca,
             "Marca_cat":          marca_cat,
             "Producto":           r["nombre"],
-            "SKU_canonico":       sku_canonico_ac(marca, var_unif, g),
+            "SKU_canonico":       sku_canonico_ac(marca, sku_var, g, envase),
             "Variedad":           var_unif,
             "Variedad_raw":       var_raw,
             "Variedad_conf":      r["variedad_confianza"] or "baja",
@@ -701,7 +751,7 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
             "En_oferta":          bool(r["en_oferta"]),
             "Producto_id":        r["producto_id"] or "",
             "URL":                r["url"] or "",
-            "Envase":             detectar_envase_nombre(r["nombre"] or ""),
+            "Envase":             envase,
         })
 
     df = pd.DataFrame(rows)
@@ -841,11 +891,13 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="sidebar-sep">Navegación</div>', unsafe_allow_html=True)
+    if DB_PATH != DIRECTORIO / "precios.db":
+        st.caption(f"Modo copia · DB: {DB_PATH.name}")
     _page_sel = st.radio(
         "Navegación",
         ["📊  Resumen", "🫒  Por Variedad", "🏪  Por Cadena", "🏷️  Por Marca",
          "📈  Evolución", "🔖  Ofertas", "📦  Quiebres", "🔢  Tabla dinámica"],
-        key="nav_radio",
+        key="nav_radio_aceitunas" if UNIFIED_MODE else "nav_radio",
         label_visibility="collapsed",
     )
     active_page = _page_sel.split("  ", 1)[1].strip() if "  " in _page_sel else _page_sel.strip()
@@ -869,8 +921,14 @@ with st.sidebar:
     _btn_csv = False  # CSV export removed from UI
 
     # ── Botón de cambio de categoría ──────────────────────────────────
-    st.markdown('<div class="sidebar-sep">Otras categorías</div>', unsafe_allow_html=True)
-    components.html("""
+    st.markdown(
+        f'<div class="sidebar-sep">{"Cambiar sección" if UNIFIED_MODE else "Otras categorías"}</div>',
+        unsafe_allow_html=True,
+    )
+    if UNIFIED_MODE:
+        render_sidebar_section_switcher("aceitunas", key_prefix="suite_nav_aceitunas")
+    else:
+        components.html("""
 <style>
   body{margin:0;padding:0;background:transparent;font-family:'Montserrat',sans-serif}
   a.csb{
@@ -1203,15 +1261,19 @@ if active_page == "Resumen":
                      .reset_index().groupby("Cadena")["Precio_100g"].mean().reset_index(name="p100"))
         _cad_barata = _cad_p100.sort_values("p100").iloc[0] if not _cad_p100.empty else None
         _cad_cara   = _cad_p100.sort_values("p100").iloc[-1] if not _cad_p100.empty else None
-        _sku_x_marca = (_ins.groupby("Marca_cat")["SKU_canonico"].nunique()
+        _ins_marcas = _ins[~_ins["Marca"].isin(_MARCAS_AGREGADAS_EXCLUIDAS_AC)].copy()
+        _sku_x_marca = (_ins_marcas.groupby("Marca")["SKU_canonico"].nunique()
                         .reset_index(name="n").sort_values("n", ascending=False))
-        _cad_x_marca = (_ins.groupby("Marca_cat")["Cadena"].nunique()
+        _cad_x_marca = (_ins_marcas.groupby("Marca")["Cadena"].nunique()
                         .reset_index(name="n").sort_values("n", ascending=False))
         _of_x_cad = (df_full[df_full["Cadena"].isin(cadenas_sel)]
                      .groupby("Cadena")["En_oferta"].mean().mul(100)
                      .reset_index(name="pct").sort_values("pct", ascending=False))
-        _of_x_marca = (df_full[df_full["Cadena"].isin(cadenas_sel)]
-                       .groupby("Marca_cat")["En_oferta"].mean().mul(100)
+        _of_x_marca = (df_full[
+                           df_full["Cadena"].isin(cadenas_sel)
+                           & df_full["Marca"].isin(MARCAS_DESTACADAS_AC)
+                       ]
+                       .groupby("Marca")["En_oferta"].mean().mul(100)
                        .reset_index(name="pct").sort_values("pct", ascending=False))
 
         _ri1, _ri2, _ri3, _ri4 = st.columns(4, gap="medium")
@@ -1219,12 +1281,12 @@ if active_page == "Resumen":
             if not _sku_x_marca.empty:
                 r = _sku_x_marca.iloc[0]
                 _insight_card("📦", "Marca con más SKUs activos",
-                              str(r["Marca_cat"]), f"{int(r['n'])} SKUs distintos", "#0F3460")
+                              str(r["Marca"]), f"{int(r['n'])} SKUs distintos", "#0F3460")
         with _ri2:
             if not _cad_x_marca.empty:
                 r = _cad_x_marca.iloc[0]
                 _insight_card("🌐", "Marca con más presencia",
-                              str(r["Marca_cat"]), f"activa en {int(r['n'])} cadenas", "#7C3AED")
+                              str(r["Marca"]), f"activa en {int(r['n'])} cadenas", "#7C3AED")
         with _ri3:
             if _cad_barata is not None:
                 _insight_card("✅", "Cadena más barata",
@@ -1242,11 +1304,10 @@ if active_page == "Resumen":
                 _insight_card("🏪", "Cadena con más ofertas",
                               r["Cadena"], f"{r['pct']:.0f}% de sus productos en oferta", "#B45309")
         with _ri6:
-            _dest_of_pct = _of_x_marca[_of_x_marca["Marca_cat"].isin(MARCAS_DESTACADAS_AC)]
-            if not _dest_of_pct.empty:
-                r = _dest_of_pct.iloc[0]
+            if not _of_x_marca.empty:
+                r = _of_x_marca.iloc[0]
                 _insight_card("🔥", "Marca destacada con más descuentos",
-                              r["Marca_cat"], f"{r['pct']:.0f}% de registros en oferta", "#DC2626")
+                              r["Marca"], f"{r['pct']:.0f}% de registros en oferta", "#DC2626")
         with _ri7:
             _top_var = dff["Variedad"].value_counts()
             if not _top_var.empty:

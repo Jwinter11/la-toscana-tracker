@@ -5,6 +5,7 @@ Uso: python scraper.py
 
 import io
 import json
+import os
 import re
 import sys
 import time
@@ -21,12 +22,14 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
+from tracker_paths import historial_path, precios_db_path
+
 # ---------------------------------------------------------------------------
 # Configuración
 # ---------------------------------------------------------------------------
 
 DIRECTORIO = Path(__file__).parent
-ARCHIVO_HISTORIAL = DIRECTORIO / "historial_precios.json"
+ARCHIVO_HISTORIAL = historial_path()
 ARCHIVO_EXCEL = DIRECTORIO / "aceites_oliva_tracker.xlsx"
 
 PRECIO_MIN = 2_000
@@ -56,6 +59,15 @@ PALABRAS_EXCLUIR = [
 PALABRAS_INCLUIR = [
     "oliva",
 ]
+
+_HEADLESS_FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def _resolver_headless(auto_mode: bool) -> bool:
+    valor = os.environ.get("ACEITE_TRACKER_HEADLESS")
+    if valor is None:
+        return auto_mode
+    return valor.strip().lower() not in _HEADLESS_FALSE_VALUES
 
 VERDE_OFERTA = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
 VERDE_HEADER = PatternFill(start_color="4CAF50", end_color="4CAF50", fill_type="solid")
@@ -614,7 +626,11 @@ def scrape_cencosud(supermercado: str, base_url: str) -> list[dict]:
     return productos
 
 
-def scrape_cencosud_playwright(supermercado: str, base_url: str) -> list[dict]:
+def scrape_cencosud_playwright(
+    supermercado: str,
+    base_url: str,
+    headless: bool = False,
+) -> list[dict]:
     """
     Scraper Playwright para Disco, Jumbo y Vea.
     Renderiza la página real y lee el precio visible + tachado (precio_sin_dto).
@@ -632,7 +648,7 @@ def scrape_cencosud_playwright(supermercado: str, base_url: str) -> list[dict]:
     items_total: list[dict] = []
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=False)
+        browser = pw.chromium.launch(headless=headless)
         page = browser.new_page()
         try:
             # ── Primar cookies VTEX ──────────────────────────────────────────
@@ -693,9 +709,10 @@ def scrape_cencosud_playwright(supermercado: str, base_url: str) -> list[dict]:
         nombre = (item.get("name") or "").strip()
         if not nombre or not es_aceite_oliva(nombre):
             continue
-        if nombre in vistos:
+        prod_key = item.get("productHref") or item.get("productId") or nombre
+        if prod_key in vistos:
             continue
-        vistos.add(nombre)
+        vistos.add(prod_key)
 
         precio     = _parsear_precio_disco(item.get("currentPrice") or "")
         precio_orig = _parsear_precio_disco(item.get("originalPrice") or "")
@@ -717,7 +734,7 @@ def scrape_cencosud_playwright(supermercado: str, base_url: str) -> list[dict]:
             "precio":         round(precio, 2),
             "precio_sin_dto": round(precio_orig, 2) if en_oferta else None,
             "en_oferta":      en_oferta,
-            "producto_id":    item.get("productHref") or nombre,
+            "producto_id":    prod_key,
         })
 
     print(f"  [{supermercado}] {len(productos)} productos de aceite de oliva")
@@ -744,7 +761,7 @@ def _parsear_precio_coto(texto: str) -> float | None:
     return None
 
 
-def scrape_coto() -> list[dict]:
+def scrape_coto(headless: bool = False) -> list[dict]:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -755,7 +772,7 @@ def scrape_coto() -> list[dict]:
     vistos = set()
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=False)
+        browser = pw.chromium.launch(headless=headless)
         page = browser.new_page()
 
         pagina = 1
@@ -880,7 +897,7 @@ def _extraer_precio_anonima(texto: str) -> float | None:
             continue
     return None
 
-def scrape_anonima() -> list[dict]:
+def scrape_anonima(headless: bool = False) -> list[dict]:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -890,7 +907,7 @@ def scrape_anonima() -> list[dict]:
     productos = []
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=False)
+        browser = pw.chromium.launch(headless=headless)
         page = browser.new_page()
 
         # Paso 1: Seleccionar sucursal via CP
@@ -1038,7 +1055,7 @@ def scrape_anonima() -> list[dict]:
 # Historial JSON + SQLite
 # ---------------------------------------------------------------------------
 
-DB_PATH = DIRECTORIO / "precios.db"
+DB_PATH = precios_db_path()
 
 def _init_db(cur):
     cur.execute("""
@@ -1062,6 +1079,7 @@ def _init_db(cur):
 
 def guardar_en_sqlite(productos: list[dict], fecha: str) -> None:
     import sqlite3
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cur  = conn.cursor()
     _init_db(cur)
@@ -1093,6 +1111,7 @@ def cargar_historial() -> dict:
 
 
 def guardar_historial(historial: dict) -> None:
+    ARCHIVO_HISTORIAL.parent.mkdir(parents=True, exist_ok=True)
     with open(ARCHIVO_HISTORIAL, "w", encoding="utf-8") as f:
         json.dump(historial, f, ensure_ascii=False, indent=2)
 
@@ -1598,9 +1617,15 @@ def analizar_calidad(todos_productos: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def main():
+    auto_mode = "--auto" in sys.argv or not sys.stdin.isatty()
+    headless = _resolver_headless(auto_mode)
+
     print("=" * 60)
     print("Scraper de aceite de oliva - Supermercados Argentina")
     print(f"Fecha: {date.today()}")
+    if auto_mode:
+        print("Modo: automatico (sin verificacion interactiva)")
+    print(f"Navegador: {'headless' if headless else 'visible'}")
     print("=" * 60)
 
     todos_los_productos: list[dict] = []
@@ -1615,7 +1640,7 @@ def main():
     # Cencosud con Playwright (Jumbo, Disco, Vea) — lee precio renderizado incluyendo Fin de Semana
     for nombre, base_url in CENCOSUD_SUPERS.items():
         print(f"\n[{nombre}]")
-        prods = scrape_cencosud_playwright(nombre, base_url)
+        prods = scrape_cencosud_playwright(nombre, base_url, headless=headless)
         print(f"  Total {nombre}: {len(prods)} productos")
         todos_los_productos.extend(prods)
 
@@ -1627,13 +1652,13 @@ def main():
 
     # Coto
     print("\n[Coto]")
-    prods = scrape_coto()
+    prods = scrape_coto(headless=headless)
     print(f"  Total Coto: {len(prods)} productos")
     todos_los_productos.extend(prods)
 
     # La Anónima
     print("\n[La Anónima]")
-    prods = scrape_anonima()
+    prods = scrape_anonima(headless=headless)
     print(f"  Total La Anónima: {len(prods)} productos")
     todos_los_productos.extend(prods)
 
