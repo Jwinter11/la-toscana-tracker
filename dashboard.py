@@ -1652,17 +1652,19 @@ if _page_sel == "🔖  Ofertas":
     # ── Filtro de período propio para Ofertas ──────────────────────────────
     _todos_periodos_of = sorted(df_full["Periodo"].unique(),
                                 key=lambda p: df_full[df_full["Periodo"]==p]["Fecha"].min())
+    _periodos_of_default = [_todos_periodos_of[-1]] if _todos_periodos_of else []
     _fc5a, _fc5b, _ = st.columns([2, 2, 3])
     with _fc5a:
         _periodos_of_sel = st.multiselect(
             "📅 Semanas / Meses",
             _todos_periodos_of,
-            default=_todos_periodos_of,
+            default=_periodos_of_default,
             key="periodos_of",
         )
+    _periodos_of_activos = _periodos_of_sel if _periodos_of_sel else _periodos_of_default
     # Recalcular df_of con el filtro de período propio (además del filtro base)
     _mask_of = (
-        df_full["Periodo"].isin(_periodos_of_sel if _periodos_of_sel else _todos_periodos_of) &
+        df_full["Periodo"].isin(_periodos_of_activos) &
         df_full["Cadena"].isin(cadenas_sel) &
         df_full["Marca"].isin(cats_sel) &
         (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(gram_sel)) &
@@ -1670,7 +1672,7 @@ if _page_sel == "🔖  Ofertas":
     )
     df_of5 = df_full[_mask_of].copy()
     _orden_per_of5 = [p for p in _todos_periodos_of
-                      if p in (_periodos_of_sel if _periodos_of_sel else _todos_periodos_of)]
+                      if p in _periodos_of_activos]
 
     # df solo con la fecha más reciente — para los primeros 3 gráficos
     _fecha_hoy = df_full["Fecha"].max()
