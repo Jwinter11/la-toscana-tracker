@@ -19,6 +19,7 @@ COMMON_DASHBOARD_SECTIONS = [
     "🔢  Tabla dinámica",
 ]
 PLOTLY_FONT_FAMILY = "Montserrat"
+NAV_WIDGET_VERSION = "v2"
 
 
 def unified_mode_enabled() -> bool:

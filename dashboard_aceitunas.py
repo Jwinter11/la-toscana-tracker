@@ -812,6 +812,7 @@ from aceitunas_catalogo_manual import (
 )
 from dashboard_unificado_helpers import (
     COMMON_DASHBOARD_SECTIONS,
+    NAV_WIDGET_VERSION,
     PLOTLY_FONT_FAMILY,
     render_sidebar_section_switcher,
     unified_mode_enabled,
@@ -1843,6 +1844,10 @@ def preparar_metrica_mi_marca_ac(df: pd.DataFrame, modo: str) -> tuple[pd.DataFr
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
+    if "nav_radio_aceitunas" in st.session_state and f"nav_radio_aceitunas_{NAV_WIDGET_VERSION}" not in st.session_state:
+        del st.session_state["nav_radio_aceitunas"]
+    if "nav_radio" in st.session_state and f"nav_radio_{NAV_WIDGET_VERSION}" not in st.session_state:
+        del st.session_state["nav_radio"]
     st.markdown("""
     <div class="sidebar-logo">🫒 <span class="accent">Aceitunas</span> Tracker</div>
     <div class="sidebar-sub">Monitor de precios · Argentina</div>
@@ -1854,7 +1859,7 @@ with st.sidebar:
     _page_sel = st.radio(
         "Navegación",
         COMMON_DASHBOARD_SECTIONS,
-        key="nav_radio_aceitunas" if UNIFIED_MODE else "nav_radio",
+        key=f"nav_radio_aceitunas_{NAV_WIDGET_VERSION}" if UNIFIED_MODE else f"nav_radio_{NAV_WIDGET_VERSION}",
         label_visibility="collapsed",
     )
     active_page = _page_sel.split("  ", 1)[1].strip() if "  " in _page_sel else _page_sel.strip()

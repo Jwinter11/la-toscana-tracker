@@ -17,6 +17,7 @@ import streamlit as st
 
 from dashboard_unificado_helpers import (
     COMMON_DASHBOARD_SECTIONS,
+    NAV_WIDGET_VERSION,
     PLOTLY_FONT_FAMILY,
     render_sidebar_section_switcher,
     unified_mode_enabled,
@@ -811,6 +812,10 @@ orden_cats = ["La Toscana","Zuelo","Oliovita","Natura","Nucete","Cocinero","Lira
 
 # ── SIDEBAR ─────────────────────────────────────────────────────────────────────────
 with st.sidebar:
+    if "nav_radio_aceite" in st.session_state and f"nav_radio_aceite_{NAV_WIDGET_VERSION}" not in st.session_state:
+        del st.session_state["nav_radio_aceite"]
+    if "nav_radio" in st.session_state and f"nav_radio_{NAV_WIDGET_VERSION}" not in st.session_state:
+        del st.session_state["nav_radio"]
     st.markdown("""
     <div class="sidebar-logo">🫒 <span class="accent">Aceite</span> Tracker</div>
     <div class="sidebar-sub">Monitor de precios · Argentina</div>
@@ -822,7 +827,7 @@ with st.sidebar:
     _page_sel = st.radio(
         "Navegación",
         COMMON_DASHBOARD_SECTIONS,
-        key="nav_radio_aceite" if UNIFIED_MODE else "nav_radio",
+        key=f"nav_radio_aceite_{NAV_WIDGET_VERSION}" if UNIFIED_MODE else f"nav_radio_{NAV_WIDGET_VERSION}",
         label_visibility="collapsed",
     )
     active_page = _page_sel.split("  ", 1)[1].strip() if "  " in _page_sel else _page_sel.strip()
