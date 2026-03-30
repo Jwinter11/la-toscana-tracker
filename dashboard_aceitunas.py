@@ -1715,6 +1715,24 @@ def _kpi_mini(icon: str, titulo: str, valor: str, detalle: str = "") -> None:
     </div>""", unsafe_allow_html=True)
 
 
+PROMO_MECANICA_DESC_MIN = 50
+
+
+def es_promo_mecanica(desc: float | int | None) -> bool:
+    if desc is None or (isinstance(desc, float) and math.isnan(desc)):
+        return False
+    try:
+        return float(desc) >= PROMO_MECANICA_DESC_MIN
+    except (TypeError, ValueError):
+        return False
+
+
+def promo_mecanica_label(desc: float | int | None) -> str:
+    if not es_promo_mecanica(desc):
+        return ""
+    return f"Promo tipo 2da unidad · -{float(desc):.0f}%"
+
+
 def _build_offer_card_html(r, compact: bool = False) -> str:
     """Construye el HTML de una card de oferta individual."""
     url = r.get("URL", "")
@@ -1734,10 +1752,17 @@ def _build_offer_card_html(r, compact: bool = False) -> str:
     pad = "0.35rem 0.6rem" if compact else "0.55rem 0.75rem"
     vs  = "0.82rem" if compact else "0.95rem"
     ss  = "0.68rem" if compact else "0.75rem"
+    promo_badge = (
+        f'<div style="font-size:0.56rem;color:#92400E;font-weight:700;'
+        f'text-transform:uppercase;letter-spacing:0.35px;margin-bottom:0.28rem">'
+        f'{promo_mecanica_label(desc)}</div>'
+        if es_promo_mecanica(desc) else ""
+    )
     return (
         f'<div style="background:#fff;border-radius:8px;padding:{pad};'
         f'margin-bottom:0.3rem;border-left:3px solid {color};'
         f'box-shadow:0 1px 4px rgba(0,0,0,0.07)">'
+        f'{promo_badge}'
         f'<div style="font-size:{ss};font-weight:700;color:#111827;'
         f'margin-bottom:0.2rem;line-height:1.2">{sku}</div>'
         f'<div style="display:flex;gap:0.9rem;align-items:flex-end">'
@@ -2076,13 +2101,28 @@ if active_page == "Resumen":
         # evitar mezclar productos distintos bajo el mismo bucket de gramaje.
         _df_u = (dff[dff["Periodo"] == _ult_p]
                  .groupby(["Cadena", "Producto"])
-                 .agg(Precio=("Precio", "mean"), URL=("URL", "first"))
+                 .agg(
+                     Precio=("Precio", "mean"),
+                     URL=("URL", "first"),
+                     En_oferta=("En_oferta", "max"),
+                     Descuento_pct=("Descuento_pct", "max"),
+                 )
                  .reset_index())
         _df_p = (dff[dff["Periodo"] == _pen_p]
-                 .groupby(["Cadena", "Producto"])["Precio"].mean()
+                 .groupby(["Cadena", "Producto"])
+                 .agg(
+                     Precio=("Precio", "mean"),
+                     En_oferta=("En_oferta", "max"),
+                     Descuento_pct=("Descuento_pct", "max"),
+                 )
                  .reset_index())
         _merged = _df_u.merge(_df_p, on=["Cadena", "Producto"], suffixes=("_n", "_v"))
         for _, _row in _merged.iterrows():
+            if (
+                (bool(_row.get("En_oferta_n")) and es_promo_mecanica(_row.get("Descuento_pct_n")))
+                or (bool(_row.get("En_oferta_v")) and es_promo_mecanica(_row.get("Descuento_pct_v")))
+            ):
+                continue
             _pn, _pv = float(_row["Precio_n"]), float(_row["Precio_v"])
             if _pv == 0:
                 continue
@@ -2166,6 +2206,12 @@ if active_page == "Resumen":
                 else:
                     for _i, _o in enumerate(_top_of):
                         _o_url = _o.get("url", "")
+                        _promo_lbl = promo_mecanica_label(_o.get("desc"))
+                        _promo_html = (
+                            f'<div style="font-size:0.56rem;color:#92400E;font-weight:700;'
+                            f'text-transform:uppercase;letter-spacing:0.35px;margin-bottom:0.22rem">{_promo_lbl}</div>'
+                            if _promo_lbl else ""
+                        )
                         _ver_o = (f'<a href="{_o_url}" target="_blank" '
                                   f'style="font-size:0.62rem;color:#3B82F6;font-weight:600;text-decoration:none">Ver →</a>'
                                   ) if _o_url and _o_url.startswith("http") else ""
@@ -2173,6 +2219,7 @@ if active_page == "Resumen":
                         f'<div style="background:#fff;border-radius:8px;padding:0.55rem 0.75rem;'
                         f'margin-bottom:0.4rem;border-left:3px solid #3B82F6;'
                         f'box-shadow:0 1px 4px rgba(0,0,0,0.07)">'
+                        f'{_promo_html}'
                         f'<div style="font-size:0.75rem;font-weight:700;color:#111827;margin-bottom:0.35rem">'
                         f'{_MEDALS[_i] if _i < 3 else "⭐"} {_o["SKU_canonico"][:55]}</div>'
                         f'<div style="display:flex;gap:1.2rem;align-items:flex-end">'
@@ -2199,6 +2246,12 @@ if active_page == "Resumen":
                     for _od in _dest_of[:5]:
                         _clr_d = COLORES_MARCA_AC.get(_od["Marca_cat"], "#3B82F6")
                         _od_url = _od.get("url", "")
+                        _promo_lbl = promo_mecanica_label(_od.get("desc"))
+                        _promo_html = (
+                            f'<div style="font-size:0.56rem;color:#92400E;font-weight:700;'
+                            f'text-transform:uppercase;letter-spacing:0.35px;margin-bottom:0.22rem">{_promo_lbl}</div>'
+                            if _promo_lbl else ""
+                        )
                         _ver_d = (f'<a href="{_od_url}" target="_blank" '
                                   f'style="font-size:0.62rem;color:#3B82F6;font-weight:600;text-decoration:none">Ver →</a>'
                                   ) if _od_url and _od_url.startswith("http") else ""
@@ -2206,6 +2259,7 @@ if active_page == "Resumen":
                         f'<div style="background:#fff;border-radius:8px;padding:0.55rem 0.75rem;'
                         f'margin-bottom:0.4rem;border-left:3px solid {_clr_d};'
                         f'box-shadow:0 1px 4px rgba(0,0,0,0.07)">'
+                        f'{_promo_html}'
                         f'<div style="font-size:0.75rem;font-weight:700;color:#111827;margin-bottom:0.35rem">'
                         f'⭐ {_od["SKU_canonico"][:55]}</div>'
                         f'<div style="display:flex;gap:1.2rem;align-items:flex-end">'
