@@ -2099,10 +2099,12 @@ if active_page == "Resumen":
     if _ult_p and _pen_p:
         # Comparar producto a producto (no agrupado por SKU_canonico) para
         # evitar mezclar productos distintos bajo el mismo bucket de gramaje.
+        # Para cambios de "góndola" usamos el máximo precio base visto en cada
+        # período: así una oferta puntual no arrastra el promedio semanal.
         _df_u = (dff[dff["Periodo"] == _ult_p]
                  .groupby(["Cadena", "Producto"])
                  .agg(
-                     Precio=("Precio", "mean"),
+                     Precio=("Precio", "max"),
                      URL=("URL", "first"),
                      En_oferta=("En_oferta", "max"),
                      Descuento_pct=("Descuento_pct", "max"),
@@ -2111,7 +2113,7 @@ if active_page == "Resumen":
         _df_p = (dff[dff["Periodo"] == _pen_p]
                  .groupby(["Cadena", "Producto"])
                  .agg(
-                     Precio=("Precio", "mean"),
+                     Precio=("Precio", "max"),
                      En_oferta=("En_oferta", "max"),
                      Descuento_pct=("Descuento_pct", "max"),
                  )

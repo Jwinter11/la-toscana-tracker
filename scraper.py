@@ -468,6 +468,37 @@ _JS_EXTRAER_CENCOSUD = r"""() => {
             }
         }
 
+        const lines = (card.innerText || '')
+            .split(/\n+/)
+            .map(t => t.trim())
+            .filter(Boolean);
+        const priceLines = lines
+            .filter(t => /^\$\s*\d/.test(t))
+            .filter(t => !/(kg|lt\.|litro|impuesto)/i.test(t))
+            .map(t => t.replace(/\s+/g, ''));
+        if (!currentPrice && priceLines.length) {
+            currentPrice = priceLines[0];
+        }
+        if (!originalPrice && priceLines.length > 1) {
+            for (const candidate of priceLines.slice(1)) {
+                if (candidate !== currentPrice) {
+                    originalPrice = candidate;
+                    break;
+                }
+            }
+        }
+        if (!discountPct) {
+            for (const line of lines) {
+                const mPct = line.match(/(?:^|\D)(\d{1,2})\s*%/i);
+                if (!mPct) continue;
+                const pct = parseInt(mPct[1]);
+                if (pct >= 5 && pct <= 80) {
+                    discountPct = pct;
+                    break;
+                }
+            }
+        }
+
         // Si hay badge de % pero no precio tachado: calcular el precio original
         if (currentPrice && discountPct && !originalPrice) {
             const num = parseFloat(currentPrice.slice(1).replace(/[.]/g, '').replace(',', '.'));
