@@ -1901,7 +1901,7 @@ with st.sidebar:
         periodos_sel = periodos_disp
         st.info(f"📅 {periodos_disp[0]}")
 
-    st.markdown("---")
+    # Bloque de catalogo y ofertas consolidado en la placa principal superior.
     if st.button("🔄 Actualizar datos", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
@@ -2143,6 +2143,7 @@ if active_page == "Resumen":
 
     _top_of: list[dict] = []
     _dest_of: list[dict] = []
+    _of_agg = pd.DataFrame()
     if not _of_now.empty:
         # URL: la del producto con menor precio de oferta (mismo que se muestra en la card)
         _of_url_df = (_of_now.sort_values("Precio_oferta", ascending=True)
@@ -2163,7 +2164,115 @@ if active_page == "Resumen":
         _MARCAS_TOP3 = {"La Toscana", "Castell", "Nucete"}
         _dest_of  = _of_agg[_of_agg["Marca_cat"].isin(_MARCAS_TOP3)].to_dict("records")
 
-    with st.expander("🔔 Novedades", expanded=True):
+    _cambios_df = pd.DataFrame(_cambios)
+    if not _cambios_df.empty:
+        _subas = _cambios_df[_cambios_df["pct"] > 0].sort_values("pct", ascending=False)
+        _bajas_all = _cambios_df[_cambios_df["pct"] < 0].sort_values("pct")
+        _bajas = _bajas_all[_bajas_all["pct"] >= -15]
+    else:
+        _subas = pd.DataFrame(columns=["sku", "cadena", "viejo", "nuevo", "pct", "url"])
+        _bajas = pd.DataFrame(columns=["sku", "cadena", "viejo", "nuevo", "pct", "url"])
+
+    _con_of_act = _of_agg.copy()
+    if not _con_of_act.empty:
+        _con_of_act["Producto"] = _con_of_act["SKU_canonico"]
+        _con_of_act["Marca"] = _con_of_act["Marca_cat"]
+
+    _fn_act = _all_dates[-1] if _all_dates else None
+    _fn_ant = _all_dates[-2] if len(_all_dates) >= 2 else None
+    _fn_ant_str = pd.Timestamp(_fn_ant).strftime("%d/%m/%Y") if _fn_ant is not None else ""
+    _fn_act_str = pd.Timestamp(_fn_act).strftime("%d/%m/%Y") if _fn_act is not None else ""
+    _hay_algo = (not _subas.empty) or (not _bajas.empty) or (not _con_of_act.empty)
+
+    def _fila_resumen(sku, cadena, flecha, pct_str, p_de, p_a, color_flecha, url="", promo_label=""):
+        _ver = (f'&nbsp;<a href="{url}" target="_blank" '
+                f'style="font-size:0.68rem;color:#3B82F6;font-weight:600">Ver →</a>'
+                if (isinstance(url, str) and url.startswith("http")) else "")
+        _promo = (
+            f"<span style='display:block;font-size:0.62rem;color:#92400E;font-weight:700;"
+            f"text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px'>{promo_label}</span>"
+            if promo_label else ""
+        )
+        return (
+            f"<div style='padding:5px 0;border-bottom:1px solid #E5E7EB'>"
+            f"<span style='font-size:0.82rem;color:#111827'>"
+            f"{_promo}"
+            f"<b style='word-break:break-word'>{sku}</b><br>"
+            f"<span style='color:#6B7280'>{cadena}</span>&nbsp;&nbsp;"
+            f"<span style='color:{color_flecha}'>{flecha} {pct_str}</span>"
+            f"&nbsp;&nbsp;${p_de:,.0f} → <b>${p_a:,.0f}</b>"
+            f"{_ver}"
+            f"</span></div>"
+        )
+
+    def _titulo_col_resumen(emoji, texto, n, subtitulo=None):
+        sub = subtitulo if subtitulo is not None else f"{_fn_ant_str} → {_fn_act_str}"
+        st.markdown(
+            f"<p style='font-size:0.95rem;font-weight:700;color:#111827;margin:0 0 4px 0'>"
+            f"{emoji} {texto} ({n})</p>"
+            f"<p style='font-size:0.75rem;color:#6B7280;margin:0 0 8px 0'>{sub}</p>",
+            unsafe_allow_html=True,
+        )
+
+    with st.container():
+        if not _hay_algo:
+            st.info("Ningun cambio detectado entre las ultimas dos semanas.")
+        else:
+            _col_s, _col_b, _col_o, _col_dest = st.columns(4, gap="large")
+            with _col_s:
+                _titulo_col_resumen("🔴", "Subas", len(_subas))
+                if _subas.empty:
+                    st.markdown("<span style='color:#111827;font-size:0.82rem'>Ninguna suba.</span>", unsafe_allow_html=True)
+                for _, r in _subas.head(3).iterrows():
+                    st.markdown(_fila_resumen(r["sku"], r["cadena"], "▲", f"{r['pct']:+.1f}%", r["viejo"], r["nuevo"], "#DC2626", r.get("url", "")), unsafe_allow_html=True)
+            with _col_b:
+                _titulo_col_resumen("🟢", "Bajas de gondola", len(_bajas))
+                if _bajas.empty:
+                    st.markdown("<span style='color:#111827;font-size:0.82rem'>Ninguna baja confirmada.</span>", unsafe_allow_html=True)
+                for _, r in _bajas.head(3).iterrows():
+                    st.markdown(_fila_resumen(r["sku"], r["cadena"], "▼", f"{r['pct']:+.1f}%", r["viejo"], r["nuevo"], "#16A34A", r.get("url", "")), unsafe_allow_html=True)
+            with _col_o:
+                _titulo_col_resumen("🏷️", "Ofertas activas", len(_con_of_act), subtitulo="")
+                if _con_of_act.empty:
+                    st.markdown("<span style='color:#111827;font-size:0.82rem'>Sin ofertas activas.</span>", unsafe_allow_html=True)
+                else:
+                    _of_html = "".join(
+                        _fila_resumen(
+                            r["Producto"], r["Cadena"], "▼", f"{r['desc']:.0f}% dto.",
+                            r["pg"], r["pof"], "#B45309", r.get("url", ""),
+                            promo_mecanica_label(r.get("desc")),
+                        )
+                        for _, r in _con_of_act.iterrows()
+                    )
+                    st.markdown(f'<div style="max-height:420px;overflow-y:auto;padding-right:4px">{_of_html}</div>', unsafe_allow_html=True)
+            with _col_dest:
+                _dest_of_rows = _con_of_act[_con_of_act["Marca"].isin({"Castell", "La Toscana", "Nucete"})].sort_values("desc", ascending=False)
+                _titulo_col_resumen("⭐", "Castell · Toscana · Nucete", len(_dest_of_rows), subtitulo="")
+                if _dest_of_rows.empty:
+                    st.markdown("<span style='color:#9CA3AF;font-size:0.82rem'>Sin ofertas activas para estas marcas.</span>", unsafe_allow_html=True)
+                else:
+                    _dest_html_parts = []
+                    for _, _dr in _dest_of_rows.iterrows():
+                        _dr_color = COLORES_MARCA_AC.get(_dr.get("Marca", ""), "#3B82F6")
+                        _dr_url_raw = _dr.get("url", "")
+                        _dr_url = (_dr_url_raw if (isinstance(_dr_url_raw, str) and _dr_url_raw.startswith("http")) else "")
+                        _dr_ver = (f'&nbsp;<a href="{_dr_url}" target="_blank" style="font-size:0.68rem;color:#3B82F6;font-weight:600">Ver →</a>' if _dr_url else "")
+                        _promo_txt = promo_mecanica_label(_dr.get("desc"))
+                        _promo_html = (
+                            f"<span style='display:block;font-size:0.62rem;color:#92400E;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px'>{_promo_txt}</span>"
+                            if _promo_txt else ""
+                        )
+                        _dest_html_parts.append(
+                            f"<div style='padding:5px 0 5px 8px;border-bottom:1px solid #E5E7EB;border-left:3px solid {_dr_color};margin-bottom:2px'>"
+                            f"<span style='font-size:0.82rem;color:#111827'>{_promo_html}"
+                            f"<b style='word-break:break-word'>{str(_dr.get('Producto', ''))[:60]}</b><br>"
+                            f"<span style='color:#6B7280'>{_dr['Cadena']}</span>&nbsp;&nbsp;"
+                            f"<span style='color:#DC2626'>▼ {_dr['desc']:.0f}% dto.</span>"
+                            f"&nbsp;&nbsp;${_dr['pg']:,.0f} → <b>${_dr['pof']:,.0f}</b>{_dr_ver}</span></div>"
+                        )
+                    st.markdown(f'<div style="max-height:420px;overflow-y:auto;padding-right:4px">' + "".join(_dest_html_parts) + "</div>", unsafe_allow_html=True)
+
+    if False:
             _cn_l, _cn_r, _cn_dest = st.columns(3, gap="large")
 
             with _cn_l:
@@ -2400,7 +2509,7 @@ if active_page == "Resumen":
 
     # ── Movimientos de catálogo ──────────────────────────────────────────
     st.markdown("---")
-    with st.expander("🆕 Novedades de catálogo", expanded=True):
+    if False:
         fechas_ord = sorted(df_full["Fecha"].unique())
         _cat_l, _cat_r = st.columns([2, 1])
 
