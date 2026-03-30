@@ -5,6 +5,792 @@ Dashboard de precios de aceitunas — Aceite Tracker
 Uso: streamlit run dashboard_aceitunas.py --server.port 8502
 """
 
+if False and active_page == "Ofertas":
+    _todos_periodos_of = sorted(
+        df_full["Periodo"].unique(),
+        key=lambda p: df_full[df_full["Periodo"] == p]["Fecha"].min(),
+    )
+    _periodos_of_default = [_todos_periodos_of[-1]] if _todos_periodos_of else []
+    _of_f1, _of_f2, _of_f3, _of_f4 = st.columns([2.2, 1.4, 1.4, 1.3])
+    with _of_f1:
+        _periodos_of_sel = st.multiselect(
+            "📆 Semanas / Meses",
+            _todos_periodos_of,
+            default=_periodos_of_default,
+            key="periodos_of_aceitunas_live",
+        )
+    with _of_f2:
+        _of_var_sel = st.selectbox("Variedad", ["Todas"] + variedades_disp, key="of_var_aceitunas_live")
+    with _of_f3:
+        _of_gram_sel = st.selectbox("Gramaje", ["Todos"] + grupos_labels, key="of_gram_aceitunas_live")
+    with _of_f4:
+        _of_envase_sel = st.selectbox("Envase", ["Todos"] + envases_disp, key="of_envase_aceitunas_live")
+
+    _periodos_of_activos = _periodos_of_sel if _periodos_of_sel else _periodos_of_default
+    _of_gram_key = None
+    if _of_gram_sel != "Todos":
+        _of_gram_key = next((g for g, l in zip(grupos_disp, grupos_labels) if l == _of_gram_sel), None)
+
+    _mask_of = (
+        df_full["Periodo"].isin(_periodos_of_activos)
+        & df_full["Cadena"].isin(cadenas_sel)
+        & df_full["Variedad"].isin(variedades_sel)
+        & (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(buckets_sel))
+        & df_full["Envase"].isin(envases_sel)
+        & df_full["En_oferta"]
+    )
+    if _of_var_sel != "Todas":
+        _mask_of &= df_full["Variedad"].eq(_of_var_sel)
+    if _of_gram_key:
+        _mask_of &= df_full["Gramaje"].eq(_of_gram_key)
+    if _of_envase_sel != "Todos":
+        _mask_of &= df_full["Envase"].eq(_of_envase_sel)
+
+    df_of5 = df_full[_mask_of].copy()
+    _orden_per_of5 = [p for p in _todos_periodos_of if p in _periodos_of_activos]
+    _fecha_hoy = df_of5["Fecha"].max() if not df_of5.empty else df_full["Fecha"].max()
+    df_of5_hoy = df_of5[df_of5["Fecha"] == _fecha_hoy].copy()
+    _precio_gondola_lbl = "$/kg góndola" if _met_kg else "Precio góndola ($)"
+    _precio_oferta_lbl = "$/kg oferta" if _met_kg else "Precio oferta ($)"
+
+    if df_of5.empty:
+        st.info("🏷️ No hay productos en oferta con los filtros actuales.")
+    else:
+        with st.expander("📊 Resumen de ofertas de hoy", expanded=True):
+            _src_kpi = df_of5_hoy if not df_of5_hoy.empty else df_of5
+            _lbl_hoy = _fecha_hoy.strftime("%d/%m/%Y") if hasattr(_fecha_hoy, "strftime") else str(_fecha_hoy)
+            _oferta_prom = _src_kpi["_met_of"].dropna().mean()
+            _gondola_prom = _src_kpi["_met"].dropna().mean()
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,#7C2D12,#C2410C);border-radius:14px;
+                        padding:1.2rem 2rem;margin-bottom:1.2rem;display:flex;gap:3rem;align-items:center">
+              <div><div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.6)">Ofertas hoy · {_lbl_hoy}</div><div style="font-size:2rem;font-weight:800;color:#fff">{len(_src_kpi):,}</div></div>
+              <div><div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.6)">Descuento promedio</div><div style="font-size:2rem;font-weight:800;color:#fff">{_src_kpi["Descuento_pct"].mean():.0f}%</div></div>
+              <div><div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.6)">Precio oferta prom.</div><div style="font-size:2rem;font-weight:800;color:#fff">{f"${_oferta_prom:,.0f}" if pd.notna(_oferta_prom) else "—"}</div></div>
+              <div><div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.6)">Precio góndola prom.</div><div style="font-size:2rem;font-weight:800;color:rgba(255,255,255,0.7)">{f"${_gondola_prom:,.0f}" if pd.notna(_gondola_prom) else "—"}</div></div>
+            </div>
+            """, unsafe_allow_html=True)
+            col_l, col_r = st.columns([1, 1], gap="large")
+            with col_l:
+                df_desc_c = (_src_kpi.groupby("Cadena")["Descuento_pct"].mean().reset_index().sort_values("Descuento_pct"))
+                fig = go.Figure(go.Bar(x=df_desc_c["Descuento_pct"], y=df_desc_c["Cadena"], orientation="h",
+                                       marker_color=[cc(c) for c in df_desc_c["Cadena"]],
+                                       text=[f"{v:.0f}%" for v in df_desc_c["Descuento_pct"]],
+                                       textposition="outside", textfont=dict(size=13, color="#111827"), cliponaxis=False))
+                _vmax_d = df_desc_c["Descuento_pct"].max() if not df_desc_c.empty else 1
+                fig.update_layout(**_BASE_CORE, height=320, margin=dict(l=10, r=120, t=40, b=10),
+                                  xaxis=dict(title="Descuento %", ticksuffix="%",
+                                             tickfont=dict(size=12, color="#111827"),
+                                             range=[0, _vmax_d * 1.4 if _vmax_d else 1]),
+                                  yaxis=dict(tickfont=dict(size=13, color="#111827")), showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            with col_r:
+                df_of_cnt = _src_kpi.groupby("Cadena").size().reset_index(name="n")
+                fig = go.Figure(go.Pie(labels=df_of_cnt["Cadena"], values=df_of_cnt["n"],
+                                       marker_colors=[cc(c) for c in df_of_cnt["Cadena"]],
+                                       hole=0.55, textinfo="label+percent", textposition="outside",
+                                       textfont=dict(size=12, color="#111827")))
+                fig.update_layout(**_BASE_CORE, height=320, margin=dict(l=10, r=10, t=40, b=40), showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Precio góndola vs precio oferta por marca", expanded=True):
+            st.markdown('<div class="chart-note">La diferencia entre las barras = ahorro de la oferta</div>', unsafe_allow_html=True)
+            _gvof_gram_opts = [l for g, l in zip(grupos_disp, grupos_labels) if df_of5["Gramaje"].eq(g).any()]
+            _gvof_gram_sel = st.selectbox("Gramaje", ["Todos"] + _gvof_gram_opts, key="gram_gvof_aceitunas_live")
+            _df_gvof_src = df_of5.copy()
+            if _gvof_gram_sel != "Todos":
+                _gvof_gram_key = next((g for g, l in zip(grupos_disp, grupos_labels) if l == _gvof_gram_sel), None)
+                if _gvof_gram_key:
+                    _df_gvof_src = _df_gvof_src[_df_gvof_src["Gramaje"] == _gvof_gram_key]
+            _df_gvof_src = _df_gvof_src[~_df_gvof_src["Marca"].isin(_MARCAS_AGREGADAS_EXCLUIDAS_AC)].copy()
+            if _df_gvof_src.empty:
+                st.info("Sin ofertas para la selección actual.")
+            else:
+                df_gvof = (_df_gvof_src.groupby("Marca").agg(gondola=("_met", "mean"), oferta=("_met_of", "mean")).reset_index())
+                df_gvof = df_gvof.sort_values("Marca", key=lambda s: s.map(marca_sort_key_ac))
+                fig = go.Figure()
+                fig.add_trace(go.Bar(name="Precio góndola", x=df_gvof["Marca"], y=df_gvof["gondola"], marker_color="#D1D5DB",
+                                     text=[f"${v:,.0f}" for v in df_gvof["gondola"]], textposition="outside",
+                                     textfont=dict(size=12, color="#374151")))
+                fig.add_trace(go.Bar(name="Precio oferta", x=df_gvof["Marca"], y=df_gvof["oferta"],
+                                     marker_color=[color_marca_real_ac(m) for m in df_gvof["Marca"]],
+                                     text=[f"${v:,.0f}" for v in df_gvof["oferta"]], textposition="outside",
+                                     textfont=dict(size=12, color="#111827")))
+                _ymax = df_gvof["gondola"].max() if not df_gvof.empty else 1
+                fig.update_layout(**BASE, barmode="overlay", height=420,
+                                  yaxis=dict(title=_met_lbl, tickprefix="$", tickformat=",",
+                                             tickfont=dict(size=12, color="#111827"),
+                                             range=[0, _ymax * 1.25 if _ymax else 1]),
+                                  xaxis=dict(tickfont=dict(size=13, color="#111827"), tickangle=-20))
+                st.plotly_chart(fig, use_container_width=True)
+
+        if df_of5["Periodo"].nunique() >= 2:
+            with st.expander("Ofertas en el tiempo por marca & cadena", expanded=True):
+                col_ol, col_or = st.columns(2, gap="large")
+                _df_brand_time = df_of5[~df_of5["Marca_cat"].isin(_MARCAS_AGREGADAS_EXCLUIDAS_AC)].copy()
+                if _df_brand_time.empty:
+                    _df_brand_time = df_of5.copy()
+                with col_ol:
+                    df_of_t_m = (_df_brand_time.groupby(["Periodo", "Marca_cat"]).size().reset_index(name="n"))
+                    df_of_t_m["Periodo"] = pd.Categorical(df_of_t_m["Periodo"], categories=_orden_per_of5, ordered=True)
+                    fig = px.bar(df_of_t_m, x="Periodo", y="n", color="Marca_cat", barmode="stack",
+                                 color_discrete_map=COLORES_MARCA_AC, labels={"n": "Cantidad de ofertas", "Periodo": ""},
+                                 height=380, category_orders={"Marca_cat": ORDEN_MARCAS_AC})
+                    fig.update_layout(**BASE, xaxis=dict(tickfont=dict(size=12, color="#111827"), tickangle=-20),
+                                      yaxis=dict(tickfont=dict(size=12, color="#111827")))
+                    st.plotly_chart(fig, use_container_width=True)
+                with col_or:
+                    df_of_t_c = (df_of5.groupby(["Periodo", "Cadena"]).size().reset_index(name="n"))
+                    df_of_t_c["Periodo"] = pd.Categorical(df_of_t_c["Periodo"], categories=_orden_per_of5, ordered=True)
+                    fig = px.bar(df_of_t_c, x="Periodo", y="n", color="Cadena", barmode="stack",
+                                 color_discrete_map=COLORS_CADENAS, labels={"n": "Cantidad de ofertas", "Periodo": ""},
+                                 height=380)
+                    fig.update_layout(**BASE, xaxis=dict(tickfont=dict(size=12, color="#111827"), tickangle=-20),
+                                      yaxis=dict(tickfont=dict(size=12, color="#111827")))
+                    st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Top 20 · Mejores descuentos del período", expanded=True):
+            df_top = (df_of5.sort_values("Descuento_pct", ascending=False)
+                        .head(20)[["Cadena", "Marca", "Producto", "Variedad", "Envase", "Gramaje", "_met", "_met_of", "Descuento_pct"]]
+                        .copy())
+            df_top.columns = ["Cadena", "Marca", "Producto", "Variedad", "Envase", "Gramaje",
+                              _precio_gondola_lbl, _precio_oferta_lbl, "Descuento %"]
+            st.dataframe(df_top, height=420,
+                         column_config={
+                             _precio_gondola_lbl: st.column_config.NumberColumn(format="$%d"),
+                             _precio_oferta_lbl: st.column_config.NumberColumn(format="$%d"),
+                             "Descuento %": st.column_config.NumberColumn(format="%.0f%%"),
+                         }, hide_index=True)
+
+        with st.expander("Presencia de ofertas · marcas seleccionadas", expanded=True):
+            st.markdown('<div class="chart-note">✓ = hubo oferta ese período · — = sin oferta</div>',
+                        unsafe_allow_html=True)
+            _marcas_of2_base = df_full[
+                df_full["Periodo"].isin(_periodos_of_activos)
+                & df_full["Cadena"].isin(cadenas_sel)
+                & df_full["Variedad"].isin(variedades_sel)
+                & (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(buckets_sel))
+                & df_full["Envase"].isin(envases_sel)
+            ].copy()
+            if _of_var_sel != "Todas":
+                _marcas_of2_base = _marcas_of2_base[_marcas_of2_base["Variedad"] == _of_var_sel]
+            if _of_gram_key:
+                _marcas_of2_base = _marcas_of2_base[_marcas_of2_base["Gramaje"] == _of_gram_key]
+            if _of_envase_sel != "Todos":
+                _marcas_of2_base = _marcas_of2_base[_marcas_of2_base["Envase"] == _of_envase_sel]
+            _marcas_of2_disp = sorted(_marcas_of2_base["Marca"].dropna().unique(), key=marca_sort_key_ac)
+            _marcas_of2_default = [m for m in ["La Toscana", "Castell", "Nucete"] if m in _marcas_of2_disp]
+            if not _marcas_of2_default:
+                _marcas_of2_default = _marcas_of2_disp[:3]
+            _of2_fa, _of2_fb, _of2_fc = st.columns([2.2, 1.6, 1.2])
+            with _of2_fa:
+                _marcas_of2_sel = st.multiselect("Marca", _marcas_of2_disp, default=_marcas_of2_default,
+                                                 key="of2_marcas_aceitunas_live", placeholder="Elegí marcas")
+            _cadenas_of2_disp = sorted(_marcas_of2_base["Cadena"].dropna().unique())
+            with _of2_fb:
+                _cadenas_of2_sel = st.multiselect("Cadena", _cadenas_of2_disp, default=_cadenas_of2_disp,
+                                                  key="of2_cadenas_aceitunas_live", placeholder="Todas las cadenas")
+            with _of2_fc:
+                _of2_gran = st.selectbox("Temporalidad", ["Semanal", "Mensual"], key="of2_gran_aceitunas_live")
+            _marcas_of2_act = _marcas_of2_sel if _marcas_of2_sel else _marcas_of2_default
+            _cadenas_of2_act = _cadenas_of2_sel if _cadenas_of2_sel else _cadenas_of2_disp
+            _df_dest = _marcas_of2_base[_marcas_of2_base["Marca"].isin(_marcas_of2_act) &
+                                        _marcas_of2_base["Cadena"].isin(_cadenas_of2_act)].copy()
+            if _df_dest.empty:
+                st.info("No hay SKUs para las marcas seleccionadas con estos filtros.")
+            else:
+                if _of2_gran == "Mensual":
+                    _df_dest["_col_per"] = pd.to_datetime(_df_dest["Fecha"]).dt.strftime("%b %Y")
+                    _pers_dest_ord = [ts.strftime("%b %Y") for ts in sorted(pd.to_datetime(_df_dest["Fecha"]).dt.to_period("M").dt.to_timestamp().unique())]
+                else:
+                    _df_dest["_col_per"] = _df_dest["Periodo"]
+                    _pers_dest_ord = [p for p in _orden_per_of5 if p in set(_df_dest["Periodo"])]
+                _of_mask_dest = (
+                    df_full["En_oferta"] & df_full["Marca"].isin(_marcas_of2_act)
+                    & df_full["Periodo"].isin(_periodos_of_activos) & df_full["Cadena"].isin(_cadenas_of2_act)
+                    & df_full["Variedad"].isin(variedades_sel)
+                    & (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(buckets_sel))
+                    & df_full["Envase"].isin(envases_sel)
+                )
+                if _of_var_sel != "Todas":
+                    _of_mask_dest &= df_full["Variedad"].eq(_of_var_sel)
+                if _of_gram_key:
+                    _of_mask_dest &= df_full["Gramaje"].eq(_of_gram_key)
+                if _of_envase_sel != "Todos":
+                    _of_mask_dest &= df_full["Envase"].eq(_of_envase_sel)
+                _df_of_mask = df_full[_of_mask_dest].copy()
+                _df_of_mask["_col_per"] = pd.to_datetime(_df_of_mask["Fecha"]).dt.strftime("%b %Y") if _of2_gran == "Mensual" else _df_of_mask["Periodo"]
+                _skus_dest = sorted(_df_dest["SKU_canonico"].dropna().unique())
+                _of_set = set(zip(_df_of_mask["SKU_canonico"], _df_of_mask["_col_per"]))
+                _hmap_rows = []
+                for _sk in _skus_dest:
+                    _row = {"SKU": _sk}
+                    for _pe in _pers_dest_ord:
+                        _row[_pe] = "✓" if (_sk, _pe) in _of_set else "—"
+                    _hmap_rows.append(_row)
+                _hmap_df = pd.DataFrame(_hmap_rows).set_index("SKU")
+                _hmap_num = _hmap_df.applymap(lambda x: 1.0 if x == "✓" else 0.0)
+                fig_oh = go.Figure(go.Heatmap(
+                    z=_hmap_num.values, x=_pers_dest_ord, y=_hmap_num.index.tolist(),
+                    text=_hmap_df.values, texttemplate="%{text}",
+                    colorscale=[[0, "#F1F5F9"], [1, "#15803D"]], zmin=0, zmax=1,
+                    showscale=False, xgap=2, ygap=2, textfont=dict(size=11, color="#111827"),
+                ))
+                fig_oh.update_layout(**_BASE_CORE, height=max(120, len(_skus_dest) * 24 + 70),
+                                     margin=dict(l=10, r=10, t=10, b=10),
+                                     xaxis=dict(tickfont=dict(size=10, color="#374151"), tickangle=-30, side="top"),
+                                     yaxis=dict(tickfont=dict(size=10, color="#374151"), autorange="reversed"))
+                st.plotly_chart(fig_oh, use_container_width=True)
+
+
+if False and active_page == "Comparativa":
+    st.markdown('<div class="chart-note">Seleccioná dos marcas y luego un SKU de cada una para comparar su precio de góndola en el tiempo</div>',
+                unsafe_allow_html=True)
+    _cmp_f1, _cmp_f2, _cmp_f3, _ = st.columns([1.2, 1.2, 1.2, 2.4])
+    with _cmp_f1:
+        _cmp_var = st.selectbox("Variedad", ["Todas"] + variedades_disp, key="cmp_var_aceitunas_live")
+    with _cmp_f2:
+        _cmp_gram = st.selectbox("Gramaje", ["Todos"] + grupos_labels, key="cmp_gram_aceitunas_live")
+    with _cmp_f3:
+        _cmp_envase = st.selectbox("Envase", ["Todos"] + envases_disp, key="cmp_envase_aceitunas_live")
+    _cmp_gram_key = None
+    if _cmp_gram != "Todos":
+        _cmp_gram_key = next((g for g, l in zip(grupos_disp, grupos_labels) if l == _cmp_gram), None)
+    _cmp_base = dff.dropna(subset=["Marca", "SKU_canonico", "_met"]).copy()
+    if _cmp_var != "Todas":
+        _cmp_base = _cmp_base[_cmp_base["Variedad"] == _cmp_var]
+    if _cmp_gram_key:
+        _cmp_base = _cmp_base[_cmp_base["Gramaje"] == _cmp_gram_key]
+    if _cmp_envase != "Todos":
+        _cmp_base = _cmp_base[_cmp_base["Envase"] == _cmp_envase]
+    if _cmp_base.empty:
+        st.info("No hay datos comparables con los filtros actuales.")
+    else:
+        marcas_comp = sorted(_cmp_base["Marca"].dropna().unique(), key=marca_sort_key_ac)
+        col_m1, col_m2 = st.columns(2, gap="large")
+        with col_m1:
+            st.markdown("**Marca 1**")
+            marca_c1 = st.selectbox("Marca 1", marcas_comp, key="comp_marca1_aceitunas_live", label_visibility="collapsed")
+            skus_c1 = sorted(_cmp_base[_cmp_base["Marca"] == marca_c1]["SKU_canonico"].dropna().unique())
+            sku_c1 = st.selectbox("SKU 1", skus_c1, key="comp_sku1_aceitunas_live", label_visibility="collapsed")
+        with col_m2:
+            st.markdown("**Marca 2**")
+            default_m2 = marcas_comp[1] if len(marcas_comp) > 1 else marcas_comp[0]
+            idx_m2 = marcas_comp.index(default_m2)
+            marca_c2 = st.selectbox("Marca 2", marcas_comp, index=idx_m2, key="comp_marca2_aceitunas_live", label_visibility="collapsed")
+            skus_c2 = sorted(_cmp_base[_cmp_base["Marca"] == marca_c2]["SKU_canonico"].dropna().unique())
+            sku_c2 = st.selectbox("SKU 2", skus_c2, key="comp_sku2_aceitunas_live", label_visibility="collapsed")
+        orden_per8 = sorted(_cmp_base["Periodo"].unique(), key=lambda p: df_full[df_full["Periodo"] == p]["Fecha"].min())
+
+        def sku_evol(sku_name: str, label: str) -> pd.DataFrame:
+            df_s = (_cmp_base[_cmp_base["SKU_canonico"] == sku_name].groupby("Periodo")["_met"].mean().reset_index())
+            df_s["Periodo"] = pd.Categorical(df_s["Periodo"], categories=orden_per8, ordered=True)
+            df_s["SKU"] = label
+            return df_s
+
+        lbl1, lbl2 = sku_c1, sku_c2
+        df_comp = pd.concat([sku_evol(sku_c1, lbl1), sku_evol(sku_c2, lbl2)], ignore_index=True)
+        of_pers1 = set(_cmp_base[(_cmp_base["SKU_canonico"] == sku_c1) & _cmp_base["En_oferta"]]["Periodo"].unique())
+        of_pers2 = set(_cmp_base[(_cmp_base["SKU_canonico"] == sku_c2) & _cmp_base["En_oferta"]]["Periodo"].unique())
+        if df_comp.empty:
+            st.info("No hay datos de evolución para los SKUs seleccionados.")
+        else:
+            color1 = color_marca_real_ac(marca_c1)
+            color2 = color_marca_real_ac(marca_c2) if marca_c2 != marca_c1 else "#C73E1D"
+            fig = px.line(df_comp, x="Periodo", y="_met", color="SKU", markers=True,
+                          color_discrete_map={lbl1: color1, lbl2: color2},
+                          labels={"_met": _met_lbl, "Periodo": ""}, height=420)
+            fig.update_traces(line=dict(width=3), marker=dict(size=8))
+            st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("Semanas en oferta", expanded=True):
+                _of_rows = []
+                for _pe in orden_per8:
+                    _of_rows.append({"Período": _pe, lbl1[:35]: "✓" if _pe in of_pers1 else "—",
+                                     lbl2[:35]: "✓" if _pe in of_pers2 else "—"})
+                st.dataframe(pd.DataFrame(_of_rows), height=min(400, len(orden_per8) * 38 + 60), hide_index=True)
+
+if False and active_page == "Ofertas":
+    _todos_periodos_of = sorted(
+        df_full["Periodo"].unique(),
+        key=lambda p: df_full[df_full["Periodo"] == p]["Fecha"].min(),
+    )
+    _periodos_of_default = [_todos_periodos_of[-1]] if _todos_periodos_of else []
+    _of_f1, _of_f2, _of_f3, _of_f4 = st.columns([2.2, 1.4, 1.4, 1.3])
+    with _of_f1:
+        _periodos_of_sel = st.multiselect(
+            "📆 Semanas / Meses",
+            _todos_periodos_of,
+            default=_periodos_of_default,
+            key="periodos_of_aceitunas",
+        )
+    with _of_f2:
+        _of_var_sel = st.selectbox("Variedad", ["Todas"] + variedades_disp, key="of_var_aceitunas")
+    with _of_f3:
+        _of_gram_sel = st.selectbox("Gramaje", ["Todos"] + grupos_labels, key="of_gram_aceitunas")
+    with _of_f4:
+        _of_envase_sel = st.selectbox("Envase", ["Todos"] + envases_disp, key="of_envase_aceitunas")
+
+    _periodos_of_activos = _periodos_of_sel if _periodos_of_sel else _periodos_of_default
+    _of_gram_key = None
+    if _of_gram_sel != "Todos":
+        _of_gram_key = next((g for g, l in zip(grupos_disp, grupos_labels) if l == _of_gram_sel), None)
+
+    _mask_of = (
+        df_full["Periodo"].isin(_periodos_of_activos)
+        & df_full["Cadena"].isin(cadenas_sel)
+        & df_full["Variedad"].isin(variedades_sel)
+        & (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(buckets_sel))
+        & df_full["Envase"].isin(envases_sel)
+        & df_full["En_oferta"]
+    )
+    if _of_var_sel != "Todas":
+        _mask_of &= df_full["Variedad"].eq(_of_var_sel)
+    if _of_gram_key:
+        _mask_of &= df_full["Gramaje"].eq(_of_gram_key)
+    if _of_envase_sel != "Todos":
+        _mask_of &= df_full["Envase"].eq(_of_envase_sel)
+
+    df_of5 = df_full[_mask_of].copy()
+    _orden_per_of5 = [p for p in _todos_periodos_of if p in _periodos_of_activos]
+    _fecha_hoy = df_of5["Fecha"].max() if not df_of5.empty else df_full["Fecha"].max()
+    df_of5_hoy = df_of5[df_of5["Fecha"] == _fecha_hoy].copy()
+
+    _precio_gondola_lbl = "$/kg góndola" if _met_kg else "Precio góndola ($)"
+    _precio_oferta_lbl = "$/kg oferta" if _met_kg else "Precio oferta ($)"
+    _precio_gondola_prom_lbl = "$/kg góndola prom." if _met_kg else "Precio góndola prom."
+    _precio_oferta_prom_lbl = "$/kg oferta prom." if _met_kg else "Precio oferta prom."
+
+    if df_of5.empty:
+        st.info("🏷️ No hay productos en oferta con los filtros actuales.")
+    else:
+        with st.expander("📊 Resumen de ofertas de hoy", expanded=True):
+            _src_kpi = df_of5_hoy if not df_of5_hoy.empty else df_of5
+            _lbl_hoy = _fecha_hoy.strftime("%d/%m/%Y") if hasattr(_fecha_hoy, "strftime") else str(_fecha_hoy)
+            _oferta_prom = _src_kpi["_met_of"].dropna().mean()
+            _gondola_prom = _src_kpi["_met"].dropna().mean()
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,#7C2D12,#C2410C);border-radius:14px;
+                        padding:1.2rem 2rem;margin-bottom:1.2rem;display:flex;gap:3rem;align-items:center">
+              <div>
+                <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:1px;color:rgba(255,255,255,0.6)">Ofertas hoy · {_lbl_hoy}</div>
+                <div style="font-size:2rem;font-weight:800;color:#fff">{len(_src_kpi):,}</div>
+              </div>
+              <div>
+                <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:1px;color:rgba(255,255,255,0.6)">Descuento promedio</div>
+                <div style="font-size:2rem;font-weight:800;color:#fff">{_src_kpi["Descuento_pct"].mean():.0f}%</div>
+              </div>
+              <div>
+                <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:1px;color:rgba(255,255,255,0.6)">{_precio_oferta_prom_lbl}</div>
+                <div style="font-size:2rem;font-weight:800;color:#fff">{f"${_oferta_prom:,.0f}" if pd.notna(_oferta_prom) else "—"}</div>
+              </div>
+              <div>
+                <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:1px;color:rgba(255,255,255,0.6)">{_precio_gondola_prom_lbl}</div>
+                <div style="font-size:2rem;font-weight:800;color:rgba(255,255,255,0.7)">{f"${_gondola_prom:,.0f}" if pd.notna(_gondola_prom) else "—"}</div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            col_l, col_r = st.columns([1, 1], gap="large")
+            with col_l:
+                df_desc_c = (_src_kpi.groupby("Cadena")["Descuento_pct"].mean().reset_index().sort_values("Descuento_pct"))
+                fig = go.Figure(go.Bar(
+                    x=df_desc_c["Descuento_pct"], y=df_desc_c["Cadena"], orientation="h",
+                    marker_color=[cc(c) for c in df_desc_c["Cadena"]],
+                    text=[f"{v:.0f}%" for v in df_desc_c["Descuento_pct"]],
+                    textposition="outside", textfont=dict(size=13, color="#111827"), cliponaxis=False,
+                ))
+                _vmax_d = df_desc_c["Descuento_pct"].max() if not df_desc_c.empty else 1
+                fig.update_layout(**_BASE_CORE, height=320, margin=dict(l=10, r=120, t=40, b=10),
+                                  xaxis=dict(title="Descuento %", ticksuffix="%",
+                                             tickfont=dict(size=12, color="#111827"),
+                                             range=[0, _vmax_d * 1.4 if _vmax_d else 1]),
+                                  yaxis=dict(tickfont=dict(size=13, color="#111827")),
+                                  showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col_r:
+                df_of_cnt = _src_kpi.groupby("Cadena").size().reset_index(name="n")
+                fig = go.Figure(go.Pie(
+                    labels=df_of_cnt["Cadena"], values=df_of_cnt["n"],
+                    marker_colors=[cc(c) for c in df_of_cnt["Cadena"]],
+                    hole=0.55, textinfo="label+percent", textposition="outside",
+                    textfont=dict(size=12, color="#111827"),
+                ))
+                fig.update_layout(**_BASE_CORE, height=320, margin=dict(l=10, r=10, t=40, b=40), showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Precio góndola vs precio oferta por marca", expanded=True):
+            st.markdown('<div class="chart-note">La diferencia entre las barras = ahorro de la oferta</div>',
+                        unsafe_allow_html=True)
+            _gvof_gram_opts = [l for g, l in zip(grupos_disp, grupos_labels) if df_of5["Gramaje"].eq(g).any()]
+            _gvof_gram_sel = st.selectbox("Gramaje", ["Todos"] + _gvof_gram_opts, key="gram_gvof_aceitunas")
+            _df_gvof_src = df_of5.copy()
+            if _gvof_gram_sel != "Todos":
+                _gvof_gram_key = next((g for g, l in zip(grupos_disp, grupos_labels) if l == _gvof_gram_sel), None)
+                if _gvof_gram_key:
+                    _df_gvof_src = _df_gvof_src[_df_gvof_src["Gramaje"] == _gvof_gram_key]
+            _df_gvof_src = _df_gvof_src[~_df_gvof_src["Marca"].isin(_MARCAS_AGREGADAS_EXCLUIDAS_AC)].copy()
+            if _df_gvof_src.empty:
+                st.info("Sin ofertas para la selección actual.")
+            else:
+                df_gvof = (_df_gvof_src.groupby("Marca")
+                                      .agg(gondola=("_met", "mean"), oferta=("_met_of", "mean"))
+                                      .reset_index())
+                df_gvof = df_gvof.sort_values("Marca", key=lambda s: s.map(marca_sort_key_ac))
+                fig = go.Figure()
+                fig.add_trace(go.Bar(name="Precio góndola", x=df_gvof["Marca"], y=df_gvof["gondola"],
+                                     marker_color="#D1D5DB",
+                                     text=[f"${v:,.0f}" for v in df_gvof["gondola"]],
+                                     textposition="outside", textfont=dict(size=12, color="#374151")))
+                fig.add_trace(go.Bar(name="Precio oferta", x=df_gvof["Marca"], y=df_gvof["oferta"],
+                                     marker_color=[color_marca_real_ac(m) for m in df_gvof["Marca"]],
+                                     text=[f"${v:,.0f}" for v in df_gvof["oferta"]],
+                                     textposition="outside", textfont=dict(size=12, color="#111827")))
+                _ymax = df_gvof["gondola"].max() if not df_gvof.empty else 1
+                fig.update_layout(**BASE, barmode="overlay", height=420,
+                                  yaxis=dict(title=_met_lbl, tickprefix="$", tickformat=",",
+                                             tickfont=dict(size=12, color="#111827"),
+                                             range=[0, _ymax * 1.25 if _ymax else 1]),
+                                  xaxis=dict(tickfont=dict(size=13, color="#111827"), tickangle=-20))
+                st.plotly_chart(fig, use_container_width=True)
+
+        _n_per_of5 = df_of5["Periodo"].nunique()
+        if _n_per_of5 >= 2:
+            with st.expander("Ofertas en el tiempo por marca & cadena", expanded=True):
+                col_ol, col_or = st.columns(2, gap="large")
+                _df_brand_time = df_of5[~df_of5["Marca_cat"].isin(_MARCAS_AGREGADAS_EXCLUIDAS_AC)].copy()
+                if _df_brand_time.empty:
+                    _df_brand_time = df_of5.copy()
+
+                with col_ol:
+                    df_of_t_m = (_df_brand_time.groupby(["Periodo", "Marca_cat"]).size().reset_index(name="n"))
+                    df_of_t_m["Periodo"] = pd.Categorical(df_of_t_m["Periodo"], categories=_orden_per_of5, ordered=True)
+                    fig = px.bar(df_of_t_m, x="Periodo", y="n", color="Marca_cat", barmode="stack",
+                                 color_discrete_map=COLORES_MARCA_AC, labels={"n": "Cantidad de ofertas", "Periodo": ""},
+                                 height=380, category_orders={"Marca_cat": ORDEN_MARCAS_AC})
+                    fig.update_layout(**BASE,
+                                      xaxis=dict(tickfont=dict(size=12, color="#111827"), tickangle=-20),
+                                      yaxis=dict(tickfont=dict(size=12, color="#111827")))
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col_or:
+                    df_of_t_c = (df_of5.groupby(["Periodo", "Cadena"]).size().reset_index(name="n"))
+                    df_of_t_c["Periodo"] = pd.Categorical(df_of_t_c["Periodo"], categories=_orden_per_of5, ordered=True)
+                    fig = px.bar(df_of_t_c, x="Periodo", y="n", color="Cadena", barmode="stack",
+                                 color_discrete_map=COLORS_CADENAS, labels={"n": "Cantidad de ofertas", "Periodo": ""},
+                                 height=380)
+                    fig.update_layout(**BASE,
+                                      xaxis=dict(tickfont=dict(size=12, color="#111827"), tickangle=-20),
+                                      yaxis=dict(tickfont=dict(size=12, color="#111827")))
+                    st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Top 20 · Mejores descuentos del período", expanded=True):
+            df_top = (
+                df_of5.sort_values("Descuento_pct", ascending=False)
+                .head(20)[["Cadena", "Marca", "Producto", "Variedad", "Envase", "Gramaje", "_met", "_met_of", "Descuento_pct"]]
+                .copy()
+            )
+            df_top.columns = ["Cadena", "Marca", "Producto", "Variedad", "Envase", "Gramaje",
+                              _precio_gondola_lbl, _precio_oferta_lbl, "Descuento %"]
+            st.dataframe(df_top, height=420,
+                         column_config={
+                             _precio_gondola_lbl: st.column_config.NumberColumn(format="$%d"),
+                             _precio_oferta_lbl: st.column_config.NumberColumn(format="$%d"),
+                             "Descuento %": st.column_config.NumberColumn(format="%.0f%%"),
+                         },
+                         hide_index=True)
+
+        with st.expander("Presencia de ofertas · marcas seleccionadas", expanded=True):
+            st.markdown('<div class="chart-note">✓ = hubo oferta ese período · — = sin oferta</div>',
+                        unsafe_allow_html=True)
+            _marcas_of2_base = df_full[
+                df_full["Periodo"].isin(_periodos_of_activos)
+                & df_full["Cadena"].isin(cadenas_sel)
+                & df_full["Variedad"].isin(variedades_sel)
+                & (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(buckets_sel))
+                & df_full["Envase"].isin(envases_sel)
+            ].copy()
+            if _of_var_sel != "Todas":
+                _marcas_of2_base = _marcas_of2_base[_marcas_of2_base["Variedad"] == _of_var_sel]
+            if _of_gram_key:
+                _marcas_of2_base = _marcas_of2_base[_marcas_of2_base["Gramaje"] == _of_gram_key]
+            if _of_envase_sel != "Todos":
+                _marcas_of2_base = _marcas_of2_base[_marcas_of2_base["Envase"] == _of_envase_sel]
+
+            _marcas_of2_disp = sorted(_marcas_of2_base["Marca"].dropna().unique(), key=marca_sort_key_ac)
+            _marcas_of2_default = [m for m in ["La Toscana", "Castell", "Nucete"] if m in _marcas_of2_disp]
+            if not _marcas_of2_default:
+                _marcas_of2_default = _marcas_of2_disp[:3]
+
+            _of2_fa, _of2_fb, _of2_fc = st.columns([2.2, 1.6, 1.2])
+            with _of2_fa:
+                _marcas_of2_sel = st.multiselect("Marca", _marcas_of2_disp,
+                                                 default=_marcas_of2_default,
+                                                 key="of2_marcas_aceitunas",
+                                                 placeholder="Elegí marcas")
+            _cadenas_of2_disp = sorted(_marcas_of2_base["Cadena"].dropna().unique())
+            with _of2_fb:
+                _cadenas_of2_sel = st.multiselect("Cadena", _cadenas_of2_disp,
+                                                  default=_cadenas_of2_disp,
+                                                  key="of2_cadenas_aceitunas",
+                                                  placeholder="Todas las cadenas")
+            with _of2_fc:
+                _of2_gran = st.selectbox("Temporalidad", ["Semanal", "Mensual"], key="of2_gran_aceitunas")
+
+            _marcas_of2_act = _marcas_of2_sel if _marcas_of2_sel else _marcas_of2_default
+            _cadenas_of2_act = _cadenas_of2_sel if _cadenas_of2_sel else _cadenas_of2_disp
+            _df_dest = _marcas_of2_base[
+                _marcas_of2_base["Marca"].isin(_marcas_of2_act)
+                & _marcas_of2_base["Cadena"].isin(_cadenas_of2_act)
+            ].copy()
+
+            if _df_dest.empty:
+                st.info("No hay SKUs para las marcas seleccionadas con estos filtros.")
+            else:
+                if _of2_gran == "Mensual":
+                    _df_dest["_col_per"] = pd.to_datetime(_df_dest["Fecha"]).dt.strftime("%b %Y")
+                    _pers_dest_ord = [
+                        ts.strftime("%b %Y")
+                        for ts in sorted(pd.to_datetime(_df_dest["Fecha"]).dt.to_period("M").dt.to_timestamp().unique())
+                    ]
+                else:
+                    _df_dest["_col_per"] = _df_dest["Periodo"]
+                    _pers_dest_ord = [p for p in _orden_per_of5 if p in set(_df_dest["Periodo"])]
+
+                _of_mask_dest = (
+                    df_full["En_oferta"]
+                    & df_full["Marca"].isin(_marcas_of2_act)
+                    & df_full["Periodo"].isin(_periodos_of_activos)
+                    & df_full["Cadena"].isin(_cadenas_of2_act)
+                    & df_full["Variedad"].isin(variedades_sel)
+                    & (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(buckets_sel))
+                    & df_full["Envase"].isin(envases_sel)
+                )
+                if _of_var_sel != "Todas":
+                    _of_mask_dest &= df_full["Variedad"].eq(_of_var_sel)
+                if _of_gram_key:
+                    _of_mask_dest &= df_full["Gramaje"].eq(_of_gram_key)
+                if _of_envase_sel != "Todos":
+                    _of_mask_dest &= df_full["Envase"].eq(_of_envase_sel)
+
+                _df_of_mask = df_full[_of_mask_dest].copy()
+                if _of2_gran == "Mensual":
+                    _df_of_mask["_col_per"] = pd.to_datetime(_df_of_mask["Fecha"]).dt.strftime("%b %Y")
+                else:
+                    _df_of_mask["_col_per"] = _df_of_mask["Periodo"]
+
+                _skus_dest = sorted(_df_dest["SKU_canonico"].dropna().unique())
+                _of_set = set(zip(_df_of_mask["SKU_canonico"], _df_of_mask["_col_per"]))
+                _hmap_rows = []
+                for _sk in _skus_dest:
+                    _row = {"SKU": _sk}
+                    for _pe in _pers_dest_ord:
+                        _row[_pe] = "✓" if (_sk, _pe) in _of_set else "—"
+                    _hmap_rows.append(_row)
+                _hmap_df = pd.DataFrame(_hmap_rows).set_index("SKU")
+                _hmap_num = _hmap_df.applymap(lambda x: 1.0 if x == "✓" else 0.0)
+                _cell_h = 24
+                _header_h = 50
+                _oh_h = max(120, len(_skus_dest) * _cell_h + _header_h + 20)
+                fig_oh = go.Figure(go.Heatmap(
+                    z=_hmap_num.values,
+                    x=_pers_dest_ord,
+                    y=_hmap_num.index.tolist(),
+                    text=_hmap_df.values,
+                    texttemplate="%{text}",
+                    colorscale=[[0, "#F1F5F9"], [1, "#15803D"]],
+                    zmin=0,
+                    zmax=1,
+                    showscale=False,
+                    xgap=2,
+                    ygap=2,
+                    textfont=dict(size=11, color="#111827"),
+                ))
+                fig_oh.update_layout(**_BASE_CORE, height=_oh_h, margin=dict(l=10, r=10, t=10, b=10),
+                                     xaxis=dict(tickfont=dict(size=10, color="#374151"), tickangle=-30, side="top"),
+                                     yaxis=dict(tickfont=dict(size=10, color="#374151"), autorange="reversed"))
+                st.plotly_chart(fig_oh, use_container_width=True)
+
+
+if False and active_page == "Comparativa":
+    st.markdown('<div class="chart-note">Seleccioná dos marcas y luego un SKU de cada una para comparar su precio de góndola en el tiempo</div>',
+                unsafe_allow_html=True)
+    _cmp_f1, _cmp_f2, _cmp_f3, _ = st.columns([1.2, 1.2, 1.2, 2.4])
+    with _cmp_f1:
+        _cmp_var = st.selectbox("Variedad", ["Todas"] + variedades_disp, key="cmp_var_aceitunas")
+    with _cmp_f2:
+        _cmp_gram = st.selectbox("Gramaje", ["Todos"] + grupos_labels, key="cmp_gram_aceitunas")
+    with _cmp_f3:
+        _cmp_envase = st.selectbox("Envase", ["Todos"] + envases_disp, key="cmp_envase_aceitunas")
+
+    _cmp_gram_key = None
+    if _cmp_gram != "Todos":
+        _cmp_gram_key = next((g for g, l in zip(grupos_disp, grupos_labels) if l == _cmp_gram), None)
+
+    _cmp_base = dff.dropna(subset=["Marca", "SKU_canonico", "_met"]).copy()
+    if _cmp_var != "Todas":
+        _cmp_base = _cmp_base[_cmp_base["Variedad"] == _cmp_var]
+    if _cmp_gram_key:
+        _cmp_base = _cmp_base[_cmp_base["Gramaje"] == _cmp_gram_key]
+    if _cmp_envase != "Todos":
+        _cmp_base = _cmp_base[_cmp_base["Envase"] == _cmp_envase]
+
+    if _cmp_base.empty:
+        st.info("No hay datos comparables con los filtros actuales.")
+    else:
+        marcas_comp = sorted(_cmp_base["Marca"].dropna().unique(), key=marca_sort_key_ac)
+        col_m1, col_m2 = st.columns(2, gap="large")
+        with col_m1:
+            st.markdown("**Marca 1**")
+            marca_c1 = st.selectbox("Marca 1", marcas_comp, key="comp_marca1_aceitunas", label_visibility="collapsed")
+            skus_c1 = sorted(_cmp_base[_cmp_base["Marca"] == marca_c1]["SKU_canonico"].dropna().unique())
+            sku_c1 = st.selectbox("SKU 1", skus_c1, key="comp_sku1_aceitunas", label_visibility="collapsed")
+        with col_m2:
+            st.markdown("**Marca 2**")
+            default_m2 = marcas_comp[1] if len(marcas_comp) > 1 else marcas_comp[0]
+            idx_m2 = marcas_comp.index(default_m2)
+            marca_c2 = st.selectbox("Marca 2", marcas_comp, index=idx_m2, key="comp_marca2_aceitunas", label_visibility="collapsed")
+            skus_c2 = sorted(_cmp_base[_cmp_base["Marca"] == marca_c2]["SKU_canonico"].dropna().unique())
+            sku_c2 = st.selectbox("SKU 2", skus_c2, key="comp_sku2_aceitunas", label_visibility="collapsed")
+
+        orden_per8 = sorted(_cmp_base["Periodo"].unique(),
+                            key=lambda p: df_full[df_full["Periodo"] == p]["Fecha"].min())
+
+        def sku_evol(sku_name: str, label: str) -> pd.DataFrame:
+            df_s = (_cmp_base[_cmp_base["SKU_canonico"] == sku_name]
+                    .groupby("Periodo")["_met"].mean().reset_index())
+            df_s["Periodo"] = pd.Categorical(df_s["Periodo"], categories=orden_per8, ordered=True)
+            df_s["SKU"] = label
+            return df_s
+
+        def sku_oferta_por_periodo(sku_name: str) -> set[str]:
+            return set(_cmp_base[(_cmp_base["SKU_canonico"] == sku_name) & _cmp_base["En_oferta"]]["Periodo"].unique())
+
+        lbl1 = sku_c1
+        lbl2 = sku_c2
+        df_comp = pd.concat([sku_evol(sku_c1, lbl1), sku_evol(sku_c2, lbl2)], ignore_index=True)
+        _of_pers1 = sku_oferta_por_periodo(sku_c1)
+        _of_pers2 = sku_oferta_por_periodo(sku_c2)
+
+        if df_comp.empty:
+            st.info("No hay datos de evolución para los SKUs seleccionados.")
+        else:
+            color1 = color_marca_real_ac(marca_c1)
+            color2 = color_marca_real_ac(marca_c2) if marca_c2 != marca_c1 else "#C73E1D"
+            fig = px.line(df_comp, x="Periodo", y="_met", color="SKU", markers=True,
+                          color_discrete_map={lbl1: color1, lbl2: color2},
+                          labels={"_met": _met_lbl, "Periodo": ""}, height=420)
+            fig.update_traces(line=dict(width=3), marker=dict(size=8))
+
+            df_ev1 = sku_evol(sku_c1, lbl1)
+            df_ev2 = sku_evol(sku_c2, lbl2)
+            df_ev1_of = df_ev1[df_ev1["Periodo"].isin(_of_pers1)]
+            df_ev2_of = df_ev2[df_ev2["Periodo"].isin(_of_pers2)]
+            if not df_ev1_of.empty:
+                fig.add_trace(go.Scatter(x=df_ev1_of["Periodo"], y=df_ev1_of["_met"], mode="markers",
+                                         name=f"{lbl1} · en oferta",
+                                         marker=dict(symbol="star", size=16, color=color1,
+                                                     line=dict(color="#fff", width=1.5))))
+            if not df_ev2_of.empty:
+                fig.add_trace(go.Scatter(x=df_ev2_of["Periodo"], y=df_ev2_of["_met"], mode="markers",
+                                         name=f"{lbl2} · en oferta",
+                                         marker=dict(symbol="star", size=16, color=color2,
+                                                     line=dict(color="#fff", width=1.5))))
+            fig.update_layout(**BASE,
+                              yaxis=dict(title=_met_lbl, tickprefix="$", tickformat=",",
+                                         tickfont=dict(size=12, color="#111827")),
+                              xaxis=dict(tickfont=dict(size=12, color="#111827")))
+            st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("Semanas en oferta", expanded=True):
+                _of_rows = []
+                for _pe in orden_per8:
+                    _of_rows.append({"Período": _pe, lbl1[:35]: "✓" if _pe in _of_pers1 else "—",
+                                     lbl2[:35]: "✓" if _pe in _of_pers2 else "—"})
+                st.dataframe(pd.DataFrame(_of_rows), height=min(400, len(orden_per8) * 38 + 60), hide_index=True)
+
+            with st.expander("Precio por cadena y período", expanded=True):
+                st.markdown(f'<div class="chart-note">{_met_lbl} promedio por cadena en cada semana/mes</div>',
+                            unsafe_allow_html=True)
+
+                def _cad_per_heatmap(sku_name: str, label: str, color_hi: str) -> None:
+                    _df_cp = (_cmp_base[_cmp_base["SKU_canonico"] == sku_name]
+                              .groupby(["Cadena", "Periodo"])["_met"].mean().round(0).unstack("Periodo"))
+                    _df_cp = _df_cp.reindex(columns=[p for p in orden_per8 if p in _df_cp.columns])
+                    if _df_cp.empty:
+                        st.info(f"Sin datos para {label[:40]}")
+                        return
+                    _txt_cp = [[f"${v:,.0f}" if not pd.isna(v) else "—" for v in row] for row in _df_cp.values]
+                    _vmin = float(_df_cp.min().min()) if not _df_cp.empty else 0
+                    _vmax = float(_df_cp.max().max()) if not _df_cp.empty else 1
+                    _fig_cp = go.Figure(go.Heatmap(
+                        z=_df_cp.values, x=_df_cp.columns.tolist(), y=_df_cp.index.tolist(),
+                        colorscale=[[0, "#D1FAE5"], [0.5, "#34D399"], [1, color_hi]],
+                        zmin=_vmin, zmax=_vmax, text=_txt_cp, texttemplate="%{text}",
+                        textfont=dict(size=12, color="#111827"), showscale=False,
+                    ))
+                    _fig_cp.update_layout(**_BASE_CORE, height=max(220, len(_df_cp) * 44 + 100),
+                                          margin=dict(l=10, r=10, t=50, b=10),
+                                          title=dict(text=label[:50], font=dict(size=12, color="#374151"), x=0.01),
+                                          xaxis=dict(tickfont=dict(size=11, color="#111827"), side="top", tickangle=-25),
+                                          yaxis=dict(tickfont=dict(size=12, color="#111827")))
+                    st.plotly_chart(_fig_cp, use_container_width=True)
+
+                _col_cp1, _col_cp2 = st.columns(2, gap="large")
+                with _col_cp1:
+                    _cad_per_heatmap(sku_c1, lbl1, "#065F46")
+                with _col_cp2:
+                    _cad_per_heatmap(sku_c2, lbl2, "#7C1D2D")
+
+            with st.expander("Precio por cadena · último período disponible", expanded=True):
+                ult_per8 = orden_per8[-1] if orden_per8 else None
+                if ult_per8:
+                    df_cmp_tbl = _cmp_base[
+                        (_cmp_base["Periodo"] == ult_per8)
+                        & (_cmp_base["SKU_canonico"].isin([sku_c1, sku_c2]))
+                    ][["Cadena", "SKU_canonico", "Variedad", "Envase", "Gramaje", "_met", "En_oferta"]].copy()
+                    df_cmp_tbl.columns = ["Cadena", "SKU", "Variedad", "Envase", "Gramaje",
+                                          "$/kg góndola" if _met_kg else "Precio góndola ($)", "En oferta"]
+                    st.dataframe(
+                        df_cmp_tbl.sort_values(["SKU", "Cadena"]),
+                        height=320,
+                        column_config={
+                            "$/kg góndola" if _met_kg else "Precio góndola ($)": st.column_config.NumberColumn(format="$%d"),
+                            "En oferta": st.column_config.CheckboxColumn(),
+                        },
+                        hide_index=True,
+                    )
+
+            if df_comp["Periodo"].nunique() > 1:
+                with st.expander("Diferencia de precio entre SKUs por período", expanded=True):
+                    st.markdown('<div class="chart-note">Verde = SKU 1 más barato · Rojo = SKU 2 más barato</div>',
+                                unsafe_allow_html=True)
+                    piv_comp = df_comp.pivot(index="Periodo", columns="SKU", values="_met")
+                    if lbl1 in piv_comp.columns and lbl2 in piv_comp.columns:
+                        piv_comp["Diferencia"] = piv_comp[lbl1] - piv_comp[lbl2]
+                        piv_comp = piv_comp.dropna(subset=["Diferencia"]).reset_index()
+                        fig = go.Figure(go.Bar(
+                            x=piv_comp["Periodo"], y=piv_comp["Diferencia"],
+                            marker_color=["#00B050" if v <= 0 else "#EF4444" for v in piv_comp["Diferencia"]],
+                            text=[f"${v:+,.0f}" for v in piv_comp["Diferencia"]],
+                            textposition="outside", textfont=dict(size=12, color="#111827"), cliponaxis=False,
+                        ))
+                        fig.update_layout(**_BASE_CORE, height=320, margin=dict(l=10, r=10, t=60, b=40),
+                                          xaxis=dict(tickfont=dict(size=12, color="#111827"), tickangle=-20),
+                                          yaxis=dict(title=f"Diferencia ({_met_lbl})", tickprefix="$",
+                                                     tickformat=",", tickfont=dict(size=12, color="#111827")),
+                                          showlegend=False,
+                                          shapes=[dict(type="line", x0=-0.5, x1=len(piv_comp) - 0.5, y0=0, y1=0,
+                                                       line=dict(color="#9CA3AF", width=1.5, dash="dot"))],
+                                          title=dict(text=f"{lbl1[:30]} vs {lbl2[:30]}",
+                                                     font=dict(size=12, color="#6B7280"), x=0.01))
+                        st.plotly_chart(fig, use_container_width=True)
+
 import math
 import re
 import sqlite3
@@ -25,6 +811,8 @@ from aceitunas_catalogo_manual import (
     resolver_envase_catalogo,
 )
 from dashboard_unificado_helpers import (
+    COMMON_DASHBOARD_SECTIONS,
+    PLOTLY_FONT_FAMILY,
     render_sidebar_section_switcher,
     unified_mode_enabled,
 )
@@ -904,11 +1692,13 @@ if df_full.empty:
 
 _BASE_CORE = dict(
     template="plotly_white",
-    font=dict(family="Montserrat", size=13, color="#111827"),
+    font=dict(family=PLOTLY_FONT_FAMILY, size=13, color="#111827"),
     plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
     legend=dict(orientation="h", yanchor="bottom", y=1.02,
                 xanchor="right", x=1, font=dict(size=12, color="#111827")),
 )
+
+BASE = {**_BASE_CORE, "margin": dict(l=10, r=10, t=40, b=10)}
 
 
 def _kpi_mini(icon: str, titulo: str, valor: str, detalle: str = "") -> None:
@@ -1012,6 +1802,15 @@ def color_marca_real_ac(marca: str) -> str:
     return COLORES_MARCA_AC.get(categorizar_marca_ac(marca), "#9CA3AF")
 
 
+def marca_sort_key_ac(marca: str) -> tuple[int, str]:
+    categoria = categorizar_marca_ac(marca)
+    try:
+        idx = ORDEN_MARCAS_AC.index(categoria)
+    except ValueError:
+        idx = len(ORDEN_MARCAS_AC)
+    return idx, _normalizar_ac(str(marca))
+
+
 def aplicar_filtros_mi_marca_ac(
     df: pd.DataFrame,
     variedad: str = "Todas",
@@ -1054,8 +1853,7 @@ with st.sidebar:
         st.caption(f"Modo copia · DB: {DB_PATH.name}")
     _page_sel = st.radio(
         "Navegación",
-        ["📊  Resumen", "🫒  Por Variedad", "🏪  Por Cadena", "🏷️  Por Marca",
-         "🎯  Mi Marca", "📈  Evolución", "🔖  Ofertas", "📦  Quiebres", "🔢  Tabla dinámica"],
+        COMMON_DASHBOARD_SECTIONS,
         key="nav_radio_aceitunas" if UNIFIED_MODE else "nav_radio",
         label_visibility="collapsed",
     )
@@ -1159,11 +1957,19 @@ df_ult = df_full[df_full["Fecha"] == df_full["Fecha"].max()].copy()
 _met_kg  = metrica_sel == "$/kg"
 _met_lbl = "$/kg" if _met_kg else "Precio góndola ($)"
 if _met_kg:
+    df_full["_met"] = df_full["Precio_100g"] * 10
+    df_full["_met_of"] = df_full["Precio_100g_oferta"] * 10
     dff["_met"]    = dff["Precio_100g"] * 10
+    dff["_met_of"] = dff["Precio_100g_oferta"] * 10
     df_ult["_met"] = df_ult["Precio_100g"] * 10
+    df_ult["_met_of"] = df_ult["Precio_100g_oferta"] * 10
 else:
+    df_full["_met"] = df_full["Precio"]
+    df_full["_met_of"] = df_full["Precio_oferta"]
     dff["_met"]    = dff["Precio"]
+    dff["_met_of"] = dff["Precio_oferta"]
     df_ult["_met"] = df_ult["Precio"]
+    df_ult["_met_of"] = df_ult["Precio_oferta"]
 
 fecha_max_str = df_full["Fecha"].max().strftime("%d/%m/%Y")
 n_sem = df_full["Periodo"].nunique()
@@ -1192,7 +1998,7 @@ st.markdown(f"""
 <div class="main-header">
   <div class="header-left">
     <div class="header-eyebrow">🫒 Monitor de Precios</div>
-    <h1>Dashboard de precios MT</h1>
+    <h1>Aceitunas · Tracker</h1>
     <p>{fecha_max_str} &nbsp;·&nbsp; {len(df_ult):,} productos
        &nbsp;·&nbsp; {df_ult['Cadena'].nunique()} cadenas
        &nbsp;·&nbsp; {n_sem} semana{"s" if n_sem > 1 else ""} acumulada{"s" if n_sem > 1 else ""}</p>
@@ -1211,17 +2017,18 @@ st.markdown(f"""
 if active_page == "Resumen":
     # ── KPIs ─────────────────────────────────────────────────────────────
     dff_g        = dff.dropna(subset=["Precio_100g"])
-    precio_prom  = dff_g["Precio"].mean()
+    precio_prom  = dff["Precio"].mean()
     pkg_prom     = dff_g["Precio_100g"].mean() * 10
     p100_min     = dff_g.groupby("Cadena")["Precio_100g"].mean()
     cadena_barata = p100_min.idxmin() if not p100_min.empty else "—"
     n_oferta     = len(df_of)
     pct_of       = n_oferta / max(len(dff), 1) * 100
     desc_prom    = df_of["Descuento_pct"].mean() if not df_of.empty else 0
+    ahorro_prom  = (df_of["Precio"] - df_of["Precio_oferta"]).mean() if not df_of.empty else 0
     variedad_top = dff["Variedad"].value_counts().idxmax() if not dff.empty else "—"
     marcas_n     = dff["Marca_cat"].nunique()
 
-    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     kpis = [
         ("",       "SKUs relevados",    f"{dff['SKU_canonico'].nunique():,}", f"{dff['Cadena'].nunique()} cadenas"),
         ("green",  "$ promedio",        f"${precio_prom:,.0f}" if precio_prom else "—", "precio góndola"),
@@ -1231,14 +2038,23 @@ if active_page == "Resumen":
         ("red",    "En oferta",         f"{n_oferta:,}", f"{pct_of:.0f}% del total"),
         ("yellow", "Dto. prom.",        f"{desc_prom:.0f}%" if desc_prom > 0 else "—", f"{marcas_n} marcas"),
     ]
-    for col, (cls, label, val, sub) in zip([c1, c2, c3, c4, c5, c6, c7], kpis):
+    kpis = [
+        ("blue",   "Productos relevados", f"{dff['SKU_canonico'].nunique():,}", f"{dff['Cadena'].nunique()} cadenas"),
+        ("green",  "Precio prom. góndola", f"${precio_prom:,.0f}" if pd.notna(precio_prom) else "—", "precio sin descuento"),
+        ("orange", "Precio/kg prom.", f"${pkg_prom:,.0f}" if pd.notna(pkg_prom) else "—", "promedio por kilo"),
+        ("purple", "Cadena más barata", cadena_barata, "menor precio/kg"),
+        ("red",    "Productos en oferta", f"{n_oferta:,}", f"{pct_of:.0f}% del total"),
+        ("teal",   "Ahorro prom. oferta", f"${ahorro_prom:,.0f}" if ahorro_prom > 0 else "—",
+                   f"dto. {desc_prom:.0f}%" if desc_prom > 0 else "sin datos"),
+    ]
+    for col, (cls, label, val, sub) in zip([c1, c2, c3, c4, c5, c6], kpis):
         with col:
             st.markdown(f"""<div class="kpi-card {cls}">
                 <div class="kpi-label">{label}</div>
-                <div class="kpi-value" style="font-size:{'1.0rem' if len(val)>12 else '1.35rem' if len(val)>8 else '1.7rem'};word-break:break-word">{val}</div>
+                <div class="kpi-value" style="font-size:{'1.2rem' if len(val)>9 else '1.7rem'};word-break:break-word">{val}</div>
                 <div class="kpi-sub">{sub}</div>
             </div>""", unsafe_allow_html=True)
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<div style="margin-bottom:0.5rem"></div>', unsafe_allow_html=True)
 
     # ── Novedades ────────────────────────────────────────────────────────
     _pord = sorted(df_full["Periodo"].unique(),
@@ -1570,66 +2386,201 @@ if active_page == "Resumen":
             render_offer_cards(_of_all, compact=True, max_height=420)
 
 
-# ── TAB 2: Por Variedad ───────────────────────────────────────────────────
-if active_page == "Por Variedad":
-    _t2c1, _t2c2, _t2c3, _t2sp = st.columns([1, 1, 1, 3])
-    with _t2c1:
-        st.markdown('<p style="color:#111827;font-size:0.78rem;font-weight:700;margin-bottom:1px">Variedad</p>', unsafe_allow_html=True)
-        _t2_var = st.selectbox("Variedad", ["Todas"] + variedades_disp, key="t2_var", label_visibility="collapsed")
-    with _t2c2:
-        st.markdown('<p style="color:#111827;font-size:0.78rem;font-weight:700;margin-bottom:1px">Gramaje</p>', unsafe_allow_html=True)
-        _t2_gram_lbl = st.selectbox("Gramaje", ["Todos"] + grupos_labels, key="t2_gram", label_visibility="collapsed")
-    with _t2c3:
-        st.markdown('<p style="color:#111827;font-size:0.78rem;font-weight:700;margin-bottom:1px">Envase</p>', unsafe_allow_html=True)
-        _t2_envase = st.selectbox("Envase", ["Todos"] + envases_disp, key="t2_envase", label_visibility="collapsed")
-    st.markdown("---")
+# ── TAB 6: Comparativa ─────────────────────────────────────────────────────
+if active_page == "Comparativa":
+    st.markdown('<div class="chart-note">Seleccioná dos marcas y luego un SKU de cada una para comparar su precio de góndola en el tiempo</div>',
+                unsafe_allow_html=True)
 
-    dff_t2 = dff.copy()
-    if _t2_var != "Todas":
-        dff_t2 = dff_t2[dff_t2["Variedad"] == _t2_var]
-    if _t2_gram_lbl != "Todos":
-        _t2_gram_key = next((g for g, l in zip(grupos_disp, grupos_labels) if l == _t2_gram_lbl), None)
-        if _t2_gram_key:
-            dff_t2 = dff_t2[dff_t2["Gramaje"] == _t2_gram_key]
-    if _t2_envase != "Todos":
-        dff_t2 = dff_t2[dff_t2["Envase"] == _t2_envase]
+    _cmp_f1, _cmp_f2, _cmp_f3, _ = st.columns([1.2, 1.2, 1.2, 2.4])
+    with _cmp_f1:
+        _cmp_var = st.selectbox("Variedad", ["Todas"] + variedades_disp, key="cmp_var_aceitunas")
+    with _cmp_f2:
+        _cmp_gram = st.selectbox("Gramaje", ["Todos"] + grupos_labels, key="cmp_gram_aceitunas")
+    with _cmp_f3:
+        _cmp_envase = st.selectbox("Envase", ["Todos"] + envases_disp, key="cmp_envase_aceitunas")
 
-    with st.expander("🌡️ Precio promedio por variedad y cadena", expanded=True):
-        st.markdown(f'<div class="chart-title">{_met_lbl} promedio por variedad y cadena</div>',
-                    unsafe_allow_html=True)
-        pivot = (dff_t2.dropna(subset=["_met"])
-                 .groupby(["Variedad", "Cadena"])["_met"]
-                 .mean().round(0).unstack("Cadena"))
-        if not pivot.empty:
-            text_v = [[f"${v:,.0f}" if not pd.isna(v) else "—" for v in row]
-                      for row in pivot.values]
-            fig_hm = go.Figure(go.Heatmap(
-                z=pivot.values, x=pivot.columns.tolist(), y=pivot.index.tolist(),
-                colorscale="RdYlGn_r",
-                text=text_v, texttemplate="%{text}",
-                textfont=dict(size=12, color="#111827"),
-                colorbar=dict(title=_met_lbl, tickprefix="$", tickformat=",",
-                              tickfont=dict(color="#111827"),
-                              title_font=dict(color="#111827")),
-            ))
-            fig_hm.update_layout(**_BASE_CORE, height=max(360, len(pivot) * 40 + 80),
-                                 margin=dict(l=10, r=10, t=20, b=10),
-                                 xaxis=dict(tickfont=dict(size=13, color="#111827"), side="top"),
-                                 yaxis=dict(tickfont=dict(size=13, color="#111827")))
-            st.plotly_chart(fig_hm, use_container_width=True)
+    _cmp_gram_key = None
+    if _cmp_gram != "Todos":
+        _cmp_gram_key = next((g for g, l in zip(grupos_disp, grupos_labels) if l == _cmp_gram), None)
 
-    with st.expander("📋 Resumen por variedad", expanded=False):
-        var_resumen = (dff_t2.groupby("Variedad").agg(
-            SKUs=("SKU_canonico", "nunique"),
-            Precio_prom=("_met", "mean"),
-            En_oferta_pct=("En_oferta", lambda s: s.mean() * 100),
-            Cadenas=("Cadena", "nunique"),
-        ).round(0).reset_index())
-        var_resumen["Precio_prom"] = var_resumen["Precio_prom"].apply(
-            lambda v: f"${v:,.0f}" if pd.notna(v) else "—")
-        var_resumen["En_oferta_pct"] = var_resumen["En_oferta_pct"].apply(lambda v: f"{v:.0f}%")
-        var_resumen.columns = ["Variedad", "SKUs únicos", f"{_met_lbl} prom.", "% en oferta", "Cadenas"]
-        st.dataframe(var_resumen, use_container_width=True, hide_index=True)
+    _cmp_base = dff.dropna(subset=["Marca", "SKU_canonico", "_met"]).copy()
+    if _cmp_var != "Todas":
+        _cmp_base = _cmp_base[_cmp_base["Variedad"] == _cmp_var]
+    if _cmp_gram_key:
+        _cmp_base = _cmp_base[_cmp_base["Gramaje"] == _cmp_gram_key]
+    if _cmp_envase != "Todos":
+        _cmp_base = _cmp_base[_cmp_base["Envase"] == _cmp_envase]
+
+    if _cmp_base.empty:
+        st.info("No hay datos comparables con los filtros actuales.")
+    else:
+        marcas_comp = sorted(_cmp_base["Marca"].dropna().unique(), key=marca_sort_key_ac)
+        col_m1, col_m2 = st.columns(2, gap="large")
+
+        with col_m1:
+            st.markdown("**Marca 1**")
+            marca_c1 = st.selectbox("Marca 1", marcas_comp, key="comp_marca1_aceitunas", label_visibility="collapsed")
+            skus_c1 = sorted(_cmp_base[_cmp_base["Marca"] == marca_c1]["SKU_canonico"].dropna().unique())
+            sku_c1 = st.selectbox("SKU 1", skus_c1, key="comp_sku1_aceitunas", label_visibility="collapsed")
+
+        with col_m2:
+            st.markdown("**Marca 2**")
+            default_m2 = marcas_comp[1] if len(marcas_comp) > 1 else marcas_comp[0]
+            idx_m2 = marcas_comp.index(default_m2)
+            marca_c2 = st.selectbox("Marca 2", marcas_comp, index=idx_m2, key="comp_marca2_aceitunas", label_visibility="collapsed")
+            skus_c2 = sorted(_cmp_base[_cmp_base["Marca"] == marca_c2]["SKU_canonico"].dropna().unique())
+            sku_c2 = st.selectbox("SKU 2", skus_c2, key="comp_sku2_aceitunas", label_visibility="collapsed")
+
+        orden_per8 = sorted(_cmp_base["Periodo"].unique(), key=lambda p: df_full[df_full["Periodo"] == p]["Fecha"].min())
+
+        def sku_evol(sku_name: str, label: str) -> pd.DataFrame:
+            df_s = (_cmp_base[_cmp_base["SKU_canonico"] == sku_name]
+                    .groupby("Periodo")["_met"].mean().reset_index())
+            df_s["Periodo"] = pd.Categorical(df_s["Periodo"], categories=orden_per8, ordered=True)
+            df_s["SKU"] = label
+            return df_s
+
+        def sku_oferta_por_periodo(sku_name: str) -> set[str]:
+            return set(_cmp_base[(_cmp_base["SKU_canonico"] == sku_name) & _cmp_base["En_oferta"]]["Periodo"].unique())
+
+        lbl1 = sku_c1
+        lbl2 = sku_c2
+        df_comp = pd.concat([sku_evol(sku_c1, lbl1), sku_evol(sku_c2, lbl2)], ignore_index=True)
+        _of_pers1 = sku_oferta_por_periodo(sku_c1)
+        _of_pers2 = sku_oferta_por_periodo(sku_c2)
+
+        if df_comp.empty:
+            st.info("No hay datos de evolución para los SKUs seleccionados.")
+        else:
+            color1 = color_marca_real_ac(marca_c1)
+            color2 = color_marca_real_ac(marca_c2) if marca_c2 != marca_c1 else "#C73E1D"
+            fig = px.line(df_comp, x="Periodo", y="_met", color="SKU", markers=True,
+                          color_discrete_map={lbl1: color1, lbl2: color2},
+                          labels={"_met": _met_lbl, "Periodo": ""}, height=420)
+            fig.update_traces(line=dict(width=3), marker=dict(size=8))
+
+            df_ev1 = sku_evol(sku_c1, lbl1)
+            df_ev2 = sku_evol(sku_c2, lbl2)
+            df_ev1_of = df_ev1[df_ev1["Periodo"].isin(_of_pers1)]
+            df_ev2_of = df_ev2[df_ev2["Periodo"].isin(_of_pers2)]
+            if not df_ev1_of.empty:
+                fig.add_trace(go.Scatter(
+                    x=df_ev1_of["Periodo"], y=df_ev1_of["_met"], mode="markers",
+                    name=f"{lbl1} · en oferta",
+                    marker=dict(symbol="star", size=16, color=color1, line=dict(color="#fff", width=1.5)),
+                ))
+            if not df_ev2_of.empty:
+                fig.add_trace(go.Scatter(
+                    x=df_ev2_of["Periodo"], y=df_ev2_of["_met"], mode="markers",
+                    name=f"{lbl2} · en oferta",
+                    marker=dict(symbol="star", size=16, color=color2, line=dict(color="#fff", width=1.5)),
+                ))
+            fig.update_layout(**BASE,
+                              yaxis=dict(title=_met_lbl, tickprefix="$", tickformat=",",
+                                         tickfont=dict(size=12, color="#111827")),
+                              xaxis=dict(tickfont=dict(size=12, color="#111827")))
+            st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("Semanas en oferta", expanded=True):
+                _of_rows = []
+                for _pe in orden_per8:
+                    _of_rows.append({
+                        "Período": _pe,
+                        lbl1[:35]: "✓" if _pe in _of_pers1 else "—",
+                        lbl2[:35]: "✓" if _pe in _of_pers2 else "—",
+                    })
+                st.dataframe(pd.DataFrame(_of_rows),
+                             height=min(400, len(orden_per8) * 38 + 60),
+                             hide_index=True)
+
+            with st.expander("Precio por cadena y período", expanded=True):
+                st.markdown(f'<div class="chart-note">{_met_lbl} promedio por cadena en cada semana/mes</div>',
+                            unsafe_allow_html=True)
+
+                def _cad_per_heatmap(sku_name: str, label: str, color_hi: str) -> None:
+                    _df_cp = (_cmp_base[_cmp_base["SKU_canonico"] == sku_name]
+                              .groupby(["Cadena", "Periodo"])["_met"].mean().round(0).unstack("Periodo"))
+                    _df_cp = _df_cp.reindex(columns=[p for p in orden_per8 if p in _df_cp.columns])
+                    if _df_cp.empty:
+                        st.info(f"Sin datos para {label[:40]}")
+                        return
+                    _txt_cp = [[f"${v:,.0f}" if not pd.isna(v) else "—" for v in row] for row in _df_cp.values]
+                    _vmin = float(_df_cp.min().min()) if not _df_cp.empty else 0
+                    _vmax = float(_df_cp.max().max()) if not _df_cp.empty else 1
+                    _fig_cp = go.Figure(go.Heatmap(
+                        z=_df_cp.values,
+                        x=_df_cp.columns.tolist(),
+                        y=_df_cp.index.tolist(),
+                        colorscale=[[0, "#D1FAE5"], [0.5, "#34D399"], [1, color_hi]],
+                        zmin=_vmin,
+                        zmax=_vmax,
+                        text=_txt_cp,
+                        texttemplate="%{text}",
+                        textfont=dict(size=12, color="#111827"),
+                        showscale=False,
+                    ))
+                    _fig_cp.update_layout(**_BASE_CORE,
+                                          height=max(220, len(_df_cp) * 44 + 100),
+                                          margin=dict(l=10, r=10, t=50, b=10),
+                                          title=dict(text=label[:50], font=dict(size=12, color="#374151"), x=0.01),
+                                          xaxis=dict(tickfont=dict(size=11, color="#111827"), side="top", tickangle=-25),
+                                          yaxis=dict(tickfont=dict(size=12, color="#111827")))
+                    st.plotly_chart(_fig_cp, use_container_width=True)
+
+                _col_cp1, _col_cp2 = st.columns(2, gap="large")
+                with _col_cp1:
+                    _cad_per_heatmap(sku_c1, lbl1, "#065F46")
+                with _col_cp2:
+                    _cad_per_heatmap(sku_c2, lbl2, "#7C1D2D")
+
+            with st.expander("Precio por cadena · último período disponible", expanded=True):
+                ult_per8 = orden_per8[-1] if orden_per8 else None
+                if ult_per8:
+                    df_cmp_tbl = _cmp_base[
+                        (_cmp_base["Periodo"] == ult_per8)
+                        & (_cmp_base["SKU_canonico"].isin([sku_c1, sku_c2]))
+                    ][["Cadena", "SKU_canonico", "Variedad", "Envase", "Gramaje", "_met", "En_oferta"]].copy()
+                    _precio_cmp_lbl = "$/kg góndola" if _met_kg else "Precio góndola ($)"
+                    df_cmp_tbl.columns = ["Cadena", "SKU", "Variedad", "Envase", "Gramaje", _precio_cmp_lbl, "En oferta"]
+                    st.dataframe(
+                        df_cmp_tbl.sort_values(["SKU", "Cadena"]),
+                        height=320,
+                        column_config={
+                            _precio_cmp_lbl: st.column_config.NumberColumn(format="$%d"),
+                            "En oferta": st.column_config.CheckboxColumn(),
+                        },
+                        hide_index=True,
+                    )
+
+            if df_comp["Periodo"].nunique() > 1:
+                with st.expander("Diferencia de precio entre SKUs por período", expanded=True):
+                    st.markdown('<div class="chart-note">Verde = SKU 1 más barato · Rojo = SKU 2 más barato</div>',
+                                unsafe_allow_html=True)
+                    piv_comp = df_comp.pivot(index="Periodo", columns="SKU", values="_met")
+                    if lbl1 in piv_comp.columns and lbl2 in piv_comp.columns:
+                        piv_comp["Diferencia"] = piv_comp[lbl1] - piv_comp[lbl2]
+                        piv_comp = piv_comp.dropna(subset=["Diferencia"]).reset_index()
+                        fig = go.Figure(go.Bar(
+                            x=piv_comp["Periodo"],
+                            y=piv_comp["Diferencia"],
+                            marker_color=["#00B050" if v <= 0 else "#EF4444" for v in piv_comp["Diferencia"]],
+                            text=[f"${v:+,.0f}" for v in piv_comp["Diferencia"]],
+                            textposition="outside",
+                            textfont=dict(size=12, color="#111827"),
+                            cliponaxis=False,
+                        ))
+                        fig.update_layout(**_BASE_CORE,
+                                          height=320,
+                                          margin=dict(l=10, r=10, t=60, b=40),
+                                          xaxis=dict(tickfont=dict(size=12, color="#111827"), tickangle=-20),
+                                          yaxis=dict(title=f"Diferencia ({_met_lbl})", tickprefix="$",
+                                                     tickformat=",", tickfont=dict(size=12, color="#111827")),
+                                          showlegend=False,
+                                          shapes=[dict(type="line", x0=-0.5, x1=len(piv_comp) - 0.5, y0=0, y1=0,
+                                                       line=dict(color="#9CA3AF", width=1.5, dash="dot"))],
+                                          title=dict(text=f"{lbl1[:30]} vs {lbl2[:30]}",
+                                                     font=dict(size=12, color="#6B7280"), x=0.01))
+                        st.plotly_chart(fig, use_container_width=True)
 
 
 # ── TAB 3: Por Cadena ─────────────────────────────────────────────────────
@@ -2020,7 +2971,7 @@ if active_page == "Evolución":
 
 
 # ── TAB 6: Ofertas ────────────────────────────────────────────────────────
-if active_page == "Ofertas":
+if active_page == "__OfertasLegacy__":
     df_of_ult = df_ult[df_ult["En_oferta"]].copy()
     if df_of_ult.empty:
         st.info("Sin productos en oferta en la última semana.")
@@ -2104,6 +3055,334 @@ if active_page == "Ofertas":
 
 
 # ── TAB 7: Quiebres ───────────────────────────────────────────────────────
+if active_page == "Ofertas":
+    _todos_periodos_of = sorted(
+        df_full["Periodo"].unique(),
+        key=lambda p: df_full[df_full["Periodo"] == p]["Fecha"].min(),
+    )
+    _periodos_of_default = [_todos_periodos_of[-1]] if _todos_periodos_of else []
+    _of_f1, _of_f2, _of_f3, _of_f4 = st.columns([2.2, 1.4, 1.4, 1.3])
+    with _of_f1:
+        _periodos_of_sel = st.multiselect(
+            "Semanas / Meses",
+            _todos_periodos_of,
+            default=_periodos_of_default,
+            key="periodos_of_aceitunas",
+        )
+    with _of_f2:
+        _of_var_sel = st.selectbox("Variedad", ["Todas"] + variedades_disp, key="of_var_aceitunas")
+    with _of_f3:
+        _of_gram_sel = st.selectbox("Gramaje", ["Todos"] + grupos_labels, key="of_gram_aceitunas")
+    with _of_f4:
+        _of_envase_sel = st.selectbox("Envase", ["Todos"] + envases_disp, key="of_envase_aceitunas")
+
+    _periodos_of_activos = _periodos_of_sel if _periodos_of_sel else _periodos_of_default
+    _of_gram_key = None
+    if _of_gram_sel != "Todos":
+        _of_gram_key = next((g for g, l in zip(grupos_disp, grupos_labels) if l == _of_gram_sel), None)
+
+    _mask_of = (
+        df_full["Periodo"].isin(_periodos_of_activos)
+        & df_full["Cadena"].isin(cadenas_sel)
+        & df_full["Variedad"].isin(variedades_sel)
+        & (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(buckets_sel))
+        & df_full["Envase"].isin(envases_sel)
+        & df_full["En_oferta"]
+    )
+    if _of_var_sel != "Todas":
+        _mask_of &= df_full["Variedad"].eq(_of_var_sel)
+    if _of_gram_key:
+        _mask_of &= df_full["Gramaje"].eq(_of_gram_key)
+    if _of_envase_sel != "Todos":
+        _mask_of &= df_full["Envase"].eq(_of_envase_sel)
+
+    df_of5 = df_full[_mask_of].copy()
+    _orden_per_of5 = [p for p in _todos_periodos_of if p in _periodos_of_activos]
+    _fecha_hoy = df_of5["Fecha"].max() if not df_of5.empty else df_full["Fecha"].max()
+    df_of5_hoy = df_of5[df_of5["Fecha"] == _fecha_hoy].copy()
+
+    _precio_gondola_lbl = "$/kg góndola" if _met_kg else "Precio góndola ($)"
+    _precio_oferta_lbl = "$/kg oferta" if _met_kg else "Precio oferta ($)"
+    _precio_gondola_prom_lbl = "$/kg góndola prom." if _met_kg else "Precio góndola prom."
+    _precio_oferta_prom_lbl = "$/kg oferta prom." if _met_kg else "Precio oferta prom."
+
+    if df_of5.empty:
+        st.info("No hay productos en oferta con los filtros actuales.")
+    else:
+        with st.expander("Resumen de ofertas de hoy", expanded=True):
+            _src_kpi = df_of5_hoy if not df_of5_hoy.empty else df_of5
+            _lbl_hoy = _fecha_hoy.strftime("%d/%m/%Y") if hasattr(_fecha_hoy, "strftime") else str(_fecha_hoy)
+            _oferta_prom = _src_kpi["_met_of"].dropna().mean()
+            _gondola_prom = _src_kpi["_met"].dropna().mean()
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,#7C2D12,#C2410C);border-radius:14px;
+                        padding:1.2rem 2rem;margin-bottom:1.2rem;display:flex;gap:3rem;align-items:center">
+              <div>
+                <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:1px;color:rgba(255,255,255,0.6)">Ofertas hoy · {_lbl_hoy}</div>
+                <div style="font-size:2rem;font-weight:800;color:#fff">{len(_src_kpi):,}</div>
+              </div>
+              <div>
+                <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:1px;color:rgba(255,255,255,0.6)">Descuento promedio</div>
+                <div style="font-size:2rem;font-weight:800;color:#fff">{_src_kpi["Descuento_pct"].mean():.0f}%</div>
+              </div>
+              <div>
+                <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:1px;color:rgba(255,255,255,0.6)">{_precio_oferta_prom_lbl}</div>
+                <div style="font-size:2rem;font-weight:800;color:#fff">{f"${_oferta_prom:,.0f}" if pd.notna(_oferta_prom) else "—"}</div>
+              </div>
+              <div>
+                <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:1px;color:rgba(255,255,255,0.6)">{_precio_gondola_prom_lbl}</div>
+                <div style="font-size:2rem;font-weight:800;color:rgba(255,255,255,0.7)">{f"${_gondola_prom:,.0f}" if pd.notna(_gondola_prom) else "—"}</div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            col_l, col_r = st.columns([1, 1], gap="large")
+            with col_l:
+                df_desc_c = (_src_kpi.groupby("Cadena")["Descuento_pct"].mean().reset_index().sort_values("Descuento_pct"))
+                fig = go.Figure(go.Bar(
+                    x=df_desc_c["Descuento_pct"],
+                    y=df_desc_c["Cadena"],
+                    orientation="h",
+                    marker_color=[cc(c) for c in df_desc_c["Cadena"]],
+                    text=[f"{v:.0f}%" for v in df_desc_c["Descuento_pct"]],
+                    textposition="outside",
+                    textfont=dict(size=13, color="#111827"),
+                    cliponaxis=False,
+                ))
+                _vmax_d = df_desc_c["Descuento_pct"].max() if not df_desc_c.empty else 1
+                fig.update_layout(**_BASE_CORE,
+                                  height=320,
+                                  margin=dict(l=10, r=120, t=40, b=10),
+                                  xaxis=dict(title="Descuento %", ticksuffix="%",
+                                             tickfont=dict(size=12, color="#111827"),
+                                             range=[0, _vmax_d * 1.4 if _vmax_d else 1]),
+                                  yaxis=dict(tickfont=dict(size=13, color="#111827")),
+                                  showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col_r:
+                df_of_cnt = _src_kpi.groupby("Cadena").size().reset_index(name="n")
+                fig = go.Figure(go.Pie(
+                    labels=df_of_cnt["Cadena"],
+                    values=df_of_cnt["n"],
+                    marker_colors=[cc(c) for c in df_of_cnt["Cadena"]],
+                    hole=0.55,
+                    textinfo="label+percent",
+                    textposition="outside",
+                    textfont=dict(size=12, color="#111827"),
+                ))
+                fig.update_layout(**_BASE_CORE, height=320, margin=dict(l=10, r=10, t=40, b=40), showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Precio góndola vs precio oferta por marca", expanded=True):
+            st.markdown('<div class="chart-note">La diferencia entre las barras = ahorro de la oferta</div>',
+                        unsafe_allow_html=True)
+            _gvof_gram_opts = [l for g, l in zip(grupos_disp, grupos_labels) if df_of5["Gramaje"].eq(g).any()]
+            _gvof_gram_sel = st.selectbox("Gramaje", ["Todos"] + _gvof_gram_opts, key="gram_gvof_aceitunas")
+            _df_gvof_src = df_of5.copy()
+            if _gvof_gram_sel != "Todos":
+                _gvof_gram_key = next((g for g, l in zip(grupos_disp, grupos_labels) if l == _gvof_gram_sel), None)
+                if _gvof_gram_key:
+                    _df_gvof_src = _df_gvof_src[_df_gvof_src["Gramaje"] == _gvof_gram_key]
+            _df_gvof_src = _df_gvof_src[~_df_gvof_src["Marca"].isin(_MARCAS_AGREGADAS_EXCLUIDAS_AC)].copy()
+            if _df_gvof_src.empty:
+                st.info("Sin ofertas para la selección actual.")
+            else:
+                df_gvof = (_df_gvof_src.groupby("Marca")
+                                      .agg(gondola=("_met", "mean"), oferta=("_met_of", "mean"))
+                                      .reset_index())
+                df_gvof = df_gvof.sort_values("Marca", key=lambda s: s.map(marca_sort_key_ac))
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    name="Precio góndola",
+                    x=df_gvof["Marca"],
+                    y=df_gvof["gondola"],
+                    marker_color="#D1D5DB",
+                    text=[f"${v:,.0f}" for v in df_gvof["gondola"]],
+                    textposition="outside",
+                    textfont=dict(size=12, color="#374151"),
+                ))
+                fig.add_trace(go.Bar(
+                    name="Precio oferta",
+                    x=df_gvof["Marca"],
+                    y=df_gvof["oferta"],
+                    marker_color=[color_marca_real_ac(m) for m in df_gvof["Marca"]],
+                    text=[f"${v:,.0f}" for v in df_gvof["oferta"]],
+                    textposition="outside",
+                    textfont=dict(size=12, color="#111827"),
+                ))
+                _ymax = df_gvof["gondola"].max() if not df_gvof.empty else 1
+                fig.update_layout(**BASE,
+                                  barmode="overlay",
+                                  height=420,
+                                  yaxis=dict(title=_met_lbl, tickprefix="$", tickformat=",",
+                                             tickfont=dict(size=12, color="#111827"),
+                                             range=[0, _ymax * 1.25 if _ymax else 1]),
+                                  xaxis=dict(tickfont=dict(size=13, color="#111827"), tickangle=-20))
+                st.plotly_chart(fig, use_container_width=True)
+
+        if df_of5["Periodo"].nunique() >= 2:
+            with st.expander("Ofertas en el tiempo por marca & cadena", expanded=True):
+                col_ol, col_or = st.columns(2, gap="large")
+                _df_brand_time = df_of5[~df_of5["Marca_cat"].isin(_MARCAS_AGREGADAS_EXCLUIDAS_AC)].copy()
+                if _df_brand_time.empty:
+                    _df_brand_time = df_of5.copy()
+
+                with col_ol:
+                    df_of_t_m = (_df_brand_time.groupby(["Periodo", "Marca_cat"]).size().reset_index(name="n"))
+                    df_of_t_m["Periodo"] = pd.Categorical(df_of_t_m["Periodo"], categories=_orden_per_of5, ordered=True)
+                    fig = px.bar(df_of_t_m, x="Periodo", y="n", color="Marca_cat", barmode="stack",
+                                 color_discrete_map=COLORES_MARCA_AC, labels={"n": "Cantidad de ofertas", "Periodo": ""},
+                                 height=380, category_orders={"Marca_cat": ORDEN_MARCAS_AC})
+                    fig.update_layout(**BASE,
+                                      xaxis=dict(tickfont=dict(size=12, color="#111827"), tickangle=-20),
+                                      yaxis=dict(tickfont=dict(size=12, color="#111827")))
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col_or:
+                    df_of_t_c = (df_of5.groupby(["Periodo", "Cadena"]).size().reset_index(name="n"))
+                    df_of_t_c["Periodo"] = pd.Categorical(df_of_t_c["Periodo"], categories=_orden_per_of5, ordered=True)
+                    fig = px.bar(df_of_t_c, x="Periodo", y="n", color="Cadena", barmode="stack",
+                                 color_discrete_map=COLORS_CADENAS, labels={"n": "Cantidad de ofertas", "Periodo": ""},
+                                 height=380)
+                    fig.update_layout(**BASE,
+                                      xaxis=dict(tickfont=dict(size=12, color="#111827"), tickangle=-20),
+                                      yaxis=dict(tickfont=dict(size=12, color="#111827")))
+                    st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Top 20 · Mejores descuentos del período", expanded=True):
+            df_top = (
+                df_of5.sort_values("Descuento_pct", ascending=False)
+                .head(20)[["Cadena", "Marca", "Producto", "Variedad", "Envase", "Gramaje", "_met", "_met_of", "Descuento_pct"]]
+                .copy()
+            )
+            df_top.columns = ["Cadena", "Marca", "Producto", "Variedad", "Envase", "Gramaje",
+                              _precio_gondola_lbl, _precio_oferta_lbl, "Descuento %"]
+            st.dataframe(
+                df_top,
+                height=420,
+                column_config={
+                    _precio_gondola_lbl: st.column_config.NumberColumn(format="$%d"),
+                    _precio_oferta_lbl: st.column_config.NumberColumn(format="$%d"),
+                    "Descuento %": st.column_config.NumberColumn(format="%.0f%%"),
+                },
+                hide_index=True,
+            )
+
+        with st.expander("Presencia de ofertas · marcas seleccionadas", expanded=True):
+            st.markdown('<div class="chart-note">✓ = hubo oferta ese período · — = sin oferta</div>',
+                        unsafe_allow_html=True)
+            _marcas_of2_base = df_full[
+                df_full["Periodo"].isin(_periodos_of_activos)
+                & df_full["Cadena"].isin(cadenas_sel)
+                & df_full["Variedad"].isin(variedades_sel)
+                & (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(buckets_sel))
+                & df_full["Envase"].isin(envases_sel)
+            ].copy()
+            if _of_var_sel != "Todas":
+                _marcas_of2_base = _marcas_of2_base[_marcas_of2_base["Variedad"] == _of_var_sel]
+            if _of_gram_key:
+                _marcas_of2_base = _marcas_of2_base[_marcas_of2_base["Gramaje"] == _of_gram_key]
+            if _of_envase_sel != "Todos":
+                _marcas_of2_base = _marcas_of2_base[_marcas_of2_base["Envase"] == _of_envase_sel]
+
+            _marcas_of2_disp = sorted(_marcas_of2_base["Marca"].dropna().unique(), key=marca_sort_key_ac)
+            _marcas_of2_default = [m for m in ["La Toscana", "Castell", "Nucete"] if m in _marcas_of2_disp]
+            if not _marcas_of2_default:
+                _marcas_of2_default = _marcas_of2_disp[:3]
+
+            _of2_fa, _of2_fb, _of2_fc = st.columns([2.2, 1.6, 1.2])
+            with _of2_fa:
+                _marcas_of2_sel = st.multiselect(
+                    "Marca", _marcas_of2_disp, default=_marcas_of2_default,
+                    key="of2_marcas_aceitunas", placeholder="Elegí marcas",
+                )
+            _cadenas_of2_disp = sorted(_marcas_of2_base["Cadena"].dropna().unique())
+            with _of2_fb:
+                _cadenas_of2_sel = st.multiselect(
+                    "Cadena", _cadenas_of2_disp, default=_cadenas_of2_disp,
+                    key="of2_cadenas_aceitunas", placeholder="Todas las cadenas",
+                )
+            with _of2_fc:
+                _of2_gran = st.selectbox("Temporalidad", ["Semanal", "Mensual"], key="of2_gran_aceitunas")
+
+            _marcas_of2_act = _marcas_of2_sel if _marcas_of2_sel else _marcas_of2_default
+            _cadenas_of2_act = _cadenas_of2_sel if _cadenas_of2_sel else _cadenas_of2_disp
+            _df_dest = _marcas_of2_base[
+                _marcas_of2_base["Marca"].isin(_marcas_of2_act)
+                & _marcas_of2_base["Cadena"].isin(_cadenas_of2_act)
+            ].copy()
+
+            if _df_dest.empty:
+                st.info("No hay SKUs para las marcas seleccionadas con estos filtros.")
+            else:
+                if _of2_gran == "Mensual":
+                    _df_dest["_col_per"] = pd.to_datetime(_df_dest["Fecha"]).dt.strftime("%b %Y")
+                    _pers_dest_ord = [
+                        ts.strftime("%b %Y")
+                        for ts in sorted(pd.to_datetime(_df_dest["Fecha"]).dt.to_period("M").dt.to_timestamp().unique())
+                    ]
+                else:
+                    _df_dest["_col_per"] = _df_dest["Periodo"]
+                    _pers_dest_ord = [p for p in _orden_per_of5 if p in set(_df_dest["Periodo"])]
+
+                _of_mask_dest = (
+                    df_full["En_oferta"]
+                    & df_full["Marca"].isin(_marcas_of2_act)
+                    & df_full["Periodo"].isin(_periodos_of_activos)
+                    & df_full["Cadena"].isin(_cadenas_of2_act)
+                    & df_full["Variedad"].isin(variedades_sel)
+                    & (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(buckets_sel))
+                    & df_full["Envase"].isin(envases_sel)
+                )
+                if _of_var_sel != "Todas":
+                    _of_mask_dest &= df_full["Variedad"].eq(_of_var_sel)
+                if _of_gram_key:
+                    _of_mask_dest &= df_full["Gramaje"].eq(_of_gram_key)
+                if _of_envase_sel != "Todos":
+                    _of_mask_dest &= df_full["Envase"].eq(_of_envase_sel)
+
+                _df_of_mask = df_full[_of_mask_dest].copy()
+                _df_of_mask["_col_per"] = (
+                    pd.to_datetime(_df_of_mask["Fecha"]).dt.strftime("%b %Y")
+                    if _of2_gran == "Mensual"
+                    else _df_of_mask["Periodo"]
+                )
+                _skus_dest = sorted(_df_dest["SKU_canonico"].dropna().unique())
+                _of_set = set(zip(_df_of_mask["SKU_canonico"], _df_of_mask["_col_per"]))
+                _hmap_rows = []
+                for _sk in _skus_dest:
+                    _row = {"SKU": _sk}
+                    for _pe in _pers_dest_ord:
+                        _row[_pe] = "✓" if (_sk, _pe) in _of_set else "—"
+                    _hmap_rows.append(_row)
+                _hmap_df = pd.DataFrame(_hmap_rows).set_index("SKU")
+                _hmap_num = _hmap_df.applymap(lambda x: 1.0 if x == "✓" else 0.0)
+                fig_oh = go.Figure(go.Heatmap(
+                    z=_hmap_num.values,
+                    x=_pers_dest_ord,
+                    y=_hmap_num.index.tolist(),
+                    text=_hmap_df.values,
+                    texttemplate="%{text}",
+                    colorscale=[[0, "#F1F5F9"], [1, "#15803D"]],
+                    zmin=0,
+                    zmax=1,
+                    showscale=False,
+                    xgap=2,
+                    ygap=2,
+                    textfont=dict(size=11, color="#111827"),
+                ))
+                fig_oh.update_layout(**_BASE_CORE,
+                                     height=max(120, len(_skus_dest) * 24 + 70),
+                                     margin=dict(l=10, r=10, t=10, b=10),
+                                     xaxis=dict(tickfont=dict(size=10, color="#374151"), tickangle=-30, side="top"),
+                                     yaxis=dict(tickfont=dict(size=10, color="#374151"), autorange="reversed"))
+                st.plotly_chart(fig_oh, use_container_width=True)
+
 if active_page == "Quiebres":
     st.markdown(
         '<div class="chart-note">Un <b>quiebre</b> ocurre cuando un producto estaba disponible '

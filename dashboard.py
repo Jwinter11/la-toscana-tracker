@@ -16,6 +16,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from dashboard_unificado_helpers import (
+    COMMON_DASHBOARD_SECTIONS,
+    PLOTLY_FONT_FAMILY,
     render_sidebar_section_switcher,
     unified_mode_enabled,
 )
@@ -778,7 +780,7 @@ def cm(m): return COLORES_CAT.get(m, "#9CA3AF")
 
 _BASE_CORE = dict(
     template="plotly_white",
-    font=dict(family="Inter", size=13, color="#111827"),
+    font=dict(family=PLOTLY_FONT_FAMILY, size=13, color="#111827"),
     plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
     legend=dict(orientation="h", yanchor="bottom", y=1.02,
                 xanchor="right", x=1, font=dict(size=12, color="#111827")),
@@ -819,9 +821,7 @@ with st.sidebar:
         st.caption(f"Modo copia · DB: {DB_PATH.name}")
     _page_sel = st.radio(
         "Navegación",
-        ["📊  Resumen", "🏪  Por Cadena", "🏷️  Por Marca",
-         "📈  Evolución", "🔖  Ofertas", "⚖️  Comparativa",
-         "🎯  Mi Marca", "📦  Quiebres", "🔢  Tabla dinámica"],
+        COMMON_DASHBOARD_SECTIONS,
         key="nav_radio_aceite" if UNIFIED_MODE else "nav_radio",
         label_visibility="collapsed",
     )

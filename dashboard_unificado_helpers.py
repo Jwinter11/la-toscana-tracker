@@ -7,6 +7,18 @@ import streamlit as st
 UNIFIED_MODE_ENV = "ACEITE_TRACKER_UNIFIED_MODE"
 SECTION_KEY = "suite_section"
 _PRESERVE_KEYS = {SECTION_KEY, "_pwd_ok", "_intentos"}
+COMMON_DASHBOARD_SECTIONS = [
+    "📊  Resumen",
+    "🏪  Por Cadena",
+    "🏷️  Por Marca",
+    "📈  Evolución",
+    "🔖  Ofertas",
+    "⚖️  Comparativa",
+    "🎯  Mi Marca",
+    "📦  Quiebres",
+    "🔢  Tabla dinámica",
+]
+PLOTLY_FONT_FAMILY = "Montserrat"
 
 
 def unified_mode_enabled() -> bool:
