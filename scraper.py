@@ -83,6 +83,8 @@ def es_aceite_oliva(nombre: str) -> bool:
     # Requiere "oliva" Y "aceite" en el nombre
     if "oliva" not in n or "aceite" not in n:
         return False
+    if any(p in n for p in ("queso", "quesos", "quesito", "quesitos")):
+        return False
     if any(p in n for p in PALABRAS_EXCLUIR):
         return False
     return True

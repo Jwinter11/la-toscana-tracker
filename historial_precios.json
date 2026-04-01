@@ -3094,16 +3094,6 @@
           "precio_litro": 59900
         },
         {
-          "supermercado": "La Anonima",
-          "nombre": "Quesitos en Aceite de Oliva Familia Weiss x 100 g.",
-          "ml": 100,
-          "precio": 8900.0,
-          "precio_sin_dto": null,
-          "en_oferta": false,
-          "marca": "Quesitos",
-          "precio_litro": 89000
-        },
-        {
           "supermercado": "Carrefour",
           "nombre": "Aceite de oliva picual Famialia Zuccardi 500 cc.",
           "ml": 500,
@@ -22692,17 +22682,6 @@
           "producto_id": "/art_3122736/",
           "marca": "Familia Zuccardi",
           "precio_litro": 59900
-        },
-        {
-          "supermercado": "La Anonima",
-          "nombre": "Quesitos en Aceite de Oliva Familia Weiss x 100 g.",
-          "ml": 100,
-          "precio": 8900.0,
-          "precio_sin_dto": null,
-          "en_oferta": false,
-          "producto_id": "/art_0342671/",
-          "marca": "Quesitos",
-          "precio_litro": 89000
         }
       ]
     },
@@ -50755,17 +50734,6 @@
           "producto_id": "/art_3122736/",
           "marca": "Familia Zuccardi",
           "precio_litro": 59900
-        },
-        {
-          "supermercado": "La Anonima",
-          "nombre": "Quesitos en Aceite de Oliva Familia Weiss x 100 g.",
-          "ml": 100,
-          "precio": 8900.0,
-          "precio_sin_dto": null,
-          "en_oferta": false,
-          "producto_id": "/art_0342671/",
-          "marca": "Quesitos",
-          "precio_litro": 89000
         }
       ]
     },

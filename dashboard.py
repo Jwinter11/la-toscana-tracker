@@ -56,6 +56,8 @@ def es_producto_aceite_oliva(nombre: str) -> bool:
     n = (nombre or "").lower()
     if "oliva" not in n or "aceite" not in n:
         return False
+    if any(p in n for p in ("queso", "quesos", "quesito", "quesitos")):
+        return False
     if any(p in n for p in _PALABRAS_EXCLUIR_PRODUCTO):
         return False
     return True
