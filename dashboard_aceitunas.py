@@ -823,6 +823,22 @@ DIRECTORIO = Path(__file__).parent
 DB_PATH = precios_db_path()
 UNIFIED_MODE = unified_mode_enabled()
 
+_MESES_CORTOS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
+
+def _periodo_semanal_label(fecha) -> str:
+    ts = pd.Timestamp(fecha).normalize()
+    iso = ts.isocalendar()
+    inicio = ts - pd.Timedelta(days=int(ts.weekday()))
+    fin = inicio + pd.Timedelta(days=6)
+    mes_ini = _MESES_CORTOS_ES[inicio.month - 1]
+    mes_fin = _MESES_CORTOS_ES[fin.month - 1]
+    if inicio.month == fin.month:
+        rango = f"{inicio.day:02d}-{fin.day:02d} {mes_ini}"
+    else:
+        rango = f"{inicio.day:02d} {mes_ini}-{fin.day:02d} {mes_fin}"
+    return f"Sem {int(iso.week)} · {rango}"
+
 _PALABRAS_EXCLUIR_DASH_AC = [
     "empanada", "pizza", "relleno para",
     "pasta de aceituna", "pasta aceitunas", "pasta de aceitunas",
@@ -1675,9 +1691,7 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
         )
         df["Fecha"] = pd.to_datetime(df["Fecha"]).dt.normalize()   # normalizar a medianoche
         df["Semana_num"] = df["Fecha"].dt.isocalendar().week.astype(int)
-        df["Periodo"] = df["Fecha"].apply(
-            lambda d: f"Sem {d.isocalendar().week} · {d.strftime('%b %Y')}"
-        )
+        df["Periodo"] = df["Fecha"].apply(_periodo_semanal_label)
     return df
 
 
@@ -3687,7 +3701,7 @@ if active_page == "Quiebres":
             _seen_sem: dict = {}
             for _f in _qb_fechas_disp:
                 _ts = pd.Timestamp(_f)
-                _k  = f"Sem {_ts.isocalendar().week} · {_ts.strftime('%b %Y')}"
+                _k  = _periodo_semanal_label(_ts)
                 _seen_sem.setdefault(_k, []).append(_f)
             _qb_per_labels = list(_seen_sem.keys())
             _qb_per_map    = _seen_sem
@@ -4119,7 +4133,7 @@ if active_page == "Mi Marca":
             _mm_seen_sem = {}
             for _f in _mm_pres_fechas:
                 _ts = pd.Timestamp(_f)
-                _k = f"Sem {_ts.isocalendar().week} · {_ts.strftime('%b %Y')}"
+                _k = _periodo_semanal_label(_ts)
                 _mm_seen_sem.setdefault(_k, []).append(_f)
             _mm_per_labels = list(_mm_seen_sem.keys())
             if _mm_per_labels:

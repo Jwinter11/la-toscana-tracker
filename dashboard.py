@@ -29,6 +29,22 @@ DB_PATH = precios_db_path()
 HISTORIAL_PATH = historial_path()
 UNIFIED_MODE = unified_mode_enabled()
 
+_MESES_CORTOS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
+
+def _periodo_semanal_label(fecha) -> str:
+    ts = pd.Timestamp(fecha).normalize()
+    iso = ts.isocalendar()
+    inicio = ts - pd.Timedelta(days=int(ts.weekday()))
+    fin = inicio + pd.Timedelta(days=6)
+    mes_ini = _MESES_CORTOS_ES[inicio.month - 1]
+    mes_fin = _MESES_CORTOS_ES[fin.month - 1]
+    if inicio.month == fin.month:
+        rango = f"{inicio.day:02d}-{fin.day:02d} {mes_ini}"
+    else:
+        rango = f"{inicio.day:02d} {mes_ini}-{fin.day:02d} {mes_fin}"
+    return f"Sem {int(iso.week)} · {rango}"
+
 _PALABRAS_EXCLUIR_PRODUCTO = [
     "mayonesa", "hummus", "vinagre", "aderezo", "salsa", "pesto",
     "aceituna", "girasol", "maiz", "maíz", "soja", "canola", "spray",
@@ -765,9 +781,7 @@ def cargar_datos(_mtime=None) -> pd.DataFrame:
     if not df.empty:
         df["Fecha"] = pd.to_datetime(df["Fecha"])
         df["Semana_num"] = df["Fecha"].dt.isocalendar().week.astype(int)
-        df["Periodo"] = df["Fecha"].apply(
-            lambda d: f"Sem {d.isocalendar().week} · {d.strftime('%b %Y')}"
-        )
+        df["Periodo"] = df["Fecha"].apply(_periodo_semanal_label)
     return df
 
 df_full = cargar_datos(_mtime=_historial_mtime())
@@ -2670,7 +2684,7 @@ if _page_sel == "🎯  Mi Marca":
             _mm_seen_sem: dict = {}
             for _f in _mm_pres_fechas:
                 _ts = pd.Timestamp(_f)
-                _k = f"Sem {_ts.isocalendar().week} · {_ts.strftime('%b %Y')}"
+                _k = _periodo_semanal_label(_ts)
                 if _k not in _mm_seen_sem:
                     _mm_seen_sem[_k] = []
                 _mm_seen_sem[_k].append(_f)
@@ -2889,7 +2903,7 @@ if _page_sel == "📦  Quiebres":
             _seen_sem: dict = {}
             for _f in _qb_fechas_disp:
                 _ts = pd.Timestamp(_f)
-                _k = f"Sem {_ts.isocalendar().week} · {_ts.strftime('%b %Y')}"
+                _k = _periodo_semanal_label(_ts)
                 if _k not in _seen_sem:
                     _seen_sem[_k] = []
                 _seen_sem[_k].append(_f)
