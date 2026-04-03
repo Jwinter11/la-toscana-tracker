@@ -243,6 +243,23 @@ def resolver_envase_catalogo(
     if envase_catalogo:
         envase_detectado = envase_catalogo
 
+    marca_slug = _slug(marca)
+    variedad_slug = _slug(variedad)
+    nombre_slug = _slug(nombre)
+    gramos_int = _safe_int(gramos)
+
+    # Correcciones manuales validadas sobre familias unificadas.
+    # La Toscana verde con carozo 300g (Disco/Jumbo/Vea) corresponde a frasco.
+    if (
+        marca_slug in {"la toscana", "toscana"}
+        and gramos_int == 300
+        and (
+            variedad_slug in {"verde", "verde con carozo"}
+            or "verdes con carozo 300 gr" in nombre_slug
+        )
+    ):
+        return "Frasco"
+
     if envase_detectado in ENVASES_VALIDOS:
         return envase_detectado
 
@@ -250,7 +267,6 @@ def resolver_envase_catalogo(
         return envase_detectado
 
     n = _slug(nombre)
-    gramos_int = _safe_int(gramos)
 
     if "premium" in n or " prem " in f" {n} " or n.endswith(" prem"):
         return "Frasco Premium"
