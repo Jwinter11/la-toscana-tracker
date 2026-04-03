@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import os
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 from typing import Callable
@@ -164,6 +166,19 @@ def _filter_frame(df: pd.DataFrame, brands: list[str], chains: list[str]) -> pd.
     return out.reset_index(drop=True)
 
 
+def _filter_compare_frame(df: pd.DataFrame, brands: list[str]) -> pd.DataFrame:
+    if df.empty or not brands:
+        return df.copy()
+    brand_set = {_canon_brand(x) for x in brands}
+    brand_cols = [col for col in df.columns if col == "marca" or col.startswith("marca_")]
+    if not brand_cols:
+        return df.copy()
+    mask = pd.Series(False, index=df.index)
+    for col in brand_cols:
+        mask = mask | df[col].fillna("").isin(brand_set)
+    return df[mask].copy().reset_index(drop=True)
+
+
 def _aggregate(df: pd.DataFrame, side: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(
@@ -232,6 +247,71 @@ def _run_scraper(name: str, fn: Callable[[], list[dict]], errors: list[dict]) ->
         errors.append({"fuente": name, "error": str(exc)})
         _console(f"[audit] {name}: ERROR {exc}")
         return []
+
+
+def _run_scraper_subprocess(
+    name: str,
+    module_name: str,
+    function_name: str,
+    kwargs: dict,
+    errors: list[dict],
+) -> list[dict]:
+    runner_code = "\n".join(
+        [
+            "import contextlib",
+            "import importlib",
+            "import json",
+            "import os",
+            "import sys",
+            "payload = json.loads(sys.argv[1])",
+            "module = importlib.import_module(payload['module'])",
+            "fn = getattr(module, payload['function'])",
+            "with open(os.devnull, 'w', encoding='utf-8') as sink:",
+            "    with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):",
+            "        items = fn(**payload['kwargs']) or []",
+            "sys.stdout.write(json.dumps(items, ensure_ascii=False))",
+        ]
+    )
+    payload = json.dumps(
+        {
+            "module": module_name,
+            "function": function_name,
+            "kwargs": kwargs,
+        },
+        ensure_ascii=False,
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", runner_code, payload],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        errors.append({"fuente": name, "error": str(exc)})
+        _console(f"[audit] {name}: ERROR {exc}")
+        return []
+
+    if completed.returncode != 0:
+        error_text = (completed.stderr or completed.stdout or "").strip() or f"subprocess rc={completed.returncode}"
+        errors.append({"fuente": name, "error": error_text})
+        _console(f"[audit] {name}: ERROR {error_text}")
+        return []
+
+    raw = (completed.stdout or "").strip()
+    if not raw:
+        items: list[dict] = []
+    else:
+        try:
+            items = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            errors.append({"fuente": name, "error": f"JSON decode error: {exc}"})
+            _console(f"[audit] {name}: ERROR JSON decode error: {exc}")
+            return []
+
+    _console(f"[audit] {name}: {len(items)} productos")
+    return items
 
 
 def _oil_live_snapshot(headless: bool, allowed_chains: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -303,7 +383,11 @@ def _oil_live_snapshot(headless: bool, allowed_chains: list[str]) -> tuple[pd.Da
     for chain, fn in extra_oil_sources:
         if chain_filter and _canon_chain(chain) not in chain_filter:
             continue
-        for item in _run_scraper(chain, fn, errors):
+        if chain == "La Anonima":
+            items = _run_scraper_subprocess(chain, "scraper", "scrape_anonima", {"headless": headless}, errors)
+        else:
+            items = _run_scraper(chain, fn, errors)
+        for item in items:
             name = item.get("nombre", "")
             if not is_olive_oil_product(name):
                 continue
@@ -398,7 +482,17 @@ def _olive_live_snapshot(headless: bool, allowed_chains: list[str]) -> tuple[pd.
     for chain, fn in extra_olive_sources:
         if chain_filter and _canon_chain(chain) not in chain_filter:
             continue
-        for item in _run_scraper(chain, fn, errors):
+        if chain == "La Anonima":
+            items = _run_scraper_subprocess(
+                chain,
+                "scraper_aceitunas",
+                "scrape_anonima_aceitunas",
+                {"headless": headless},
+                errors,
+            )
+        else:
+            items = _run_scraper(chain, fn, errors)
+        for item in items:
             name = item.get("nombre", "")
             if not is_olive_product(name):
                 continue
@@ -464,18 +558,28 @@ def main() -> None:
     parser.add_argument("--brands", default="", help="Marcas separadas por coma. Si se omite, audita todas.")
     parser.add_argument("--chains", default="", help="Cadenas separadas por coma para acotar la auditoria.")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Ruta del Excel de salida.")
+    parser.add_argument("--focus-brands", default="", help="Marcas clave separadas por coma para exportar un segundo Excel filtrado.")
+    parser.add_argument("--focus-output", default="", help="Ruta opcional para el Excel filtrado de marcas clave.")
     parser.add_argument("--headless", action="store_true", help="Usa navegador headless para las reconsultas Playwright.")
     args = parser.parse_args()
 
     brands = _split_csv(args.brands)
     chains = _split_csv(args.chains)
+    focus_brands = _split_csv(args.focus_brands)
     output_path = Path(args.output).expanduser()
     if not output_path.is_absolute():
         output_path = ROOT / output_path
+    focus_output_path = None
+    if args.focus_output:
+        focus_output_path = Path(args.focus_output).expanduser()
+        if not focus_output_path.is_absolute():
+            focus_output_path = ROOT / focus_output_path
 
     conn = sqlite3.connect(precios_db_path())
     resumen_rows: list[dict] = []
     sheets: dict[str, pd.DataFrame] = {}
+    focus_summary_rows: list[dict] = []
+    focus_sheets: dict[str, pd.DataFrame] = {}
 
     if args.categoria in ("aceite", "ambas"):
         fecha = _latest_date(conn, "precios")
@@ -492,6 +596,22 @@ def main() -> None:
             sheets["aceite_faltan_live"] = missing_in_live
             sheets["aceite_diff"] = price_diff
             sheets["aceite_errors"] = errors_df
+            if focus_brands:
+                db_focus = _filter_frame(db_df, focus_brands, [])
+                live_focus = _filter_frame(live_df, focus_brands, [])
+                miss_db_focus = _filter_compare_frame(missing_in_db, focus_brands)
+                miss_live_focus = _filter_compare_frame(missing_in_live, focus_brands)
+                diff_focus = _filter_compare_frame(price_diff, focus_brands)
+                focus_summary_rows.extend(
+                    _summary_rows("aceite", fecha, db_focus, live_focus, miss_db_focus, miss_live_focus, diff_focus, errors_df)
+                )
+                focus_sheets["aceite_resumen"] = pd.DataFrame(focus_summary_rows[-1:])
+                focus_sheets["aceite_db"] = db_focus
+                focus_sheets["aceite_live"] = live_focus
+                focus_sheets["aceite_faltan_db"] = miss_db_focus
+                focus_sheets["aceite_faltan_live"] = miss_live_focus
+                focus_sheets["aceite_diff"] = diff_focus
+                focus_sheets["aceite_errors"] = errors_df
 
     if args.categoria in ("aceitunas", "ambas"):
         fecha = _latest_date(conn, "aceitunas")
@@ -508,6 +628,22 @@ def main() -> None:
             sheets["aceitunas_faltan_live"] = missing_in_live
             sheets["aceitunas_diff"] = price_diff
             sheets["aceitunas_errors"] = errors_df
+            if focus_brands:
+                db_focus = _filter_frame(db_df, focus_brands, [])
+                live_focus = _filter_frame(live_df, focus_brands, [])
+                miss_db_focus = _filter_compare_frame(missing_in_db, focus_brands)
+                miss_live_focus = _filter_compare_frame(missing_in_live, focus_brands)
+                diff_focus = _filter_compare_frame(price_diff, focus_brands)
+                focus_summary_rows.extend(
+                    _summary_rows("aceitunas", fecha, db_focus, live_focus, miss_db_focus, miss_live_focus, diff_focus, errors_df)
+                )
+                focus_sheets["aceitunas_resumen"] = pd.DataFrame(focus_summary_rows[-1:])
+                focus_sheets["aceitunas_db"] = db_focus
+                focus_sheets["aceitunas_live"] = live_focus
+                focus_sheets["aceitunas_faltan_db"] = miss_db_focus
+                focus_sheets["aceitunas_faltan_live"] = miss_live_focus
+                focus_sheets["aceitunas_diff"] = diff_focus
+                focus_sheets["aceitunas_errors"] = errors_df
 
     conn.close()
 
@@ -517,9 +653,19 @@ def main() -> None:
         for sheet_name, frame in sheets.items():
             _write_sheet(writer, sheet_name, frame)
 
+    if focus_output_path and focus_summary_rows:
+        focus_output_path.parent.mkdir(parents=True, exist_ok=True)
+        with pd.ExcelWriter(focus_output_path, engine="openpyxl") as writer:
+            _write_sheet(writer, "resumen", pd.DataFrame(focus_summary_rows))
+            for sheet_name, frame in focus_sheets.items():
+                _write_sheet(writer, sheet_name, frame)
+
     _console(f"Auditoria guardada en: {output_path}")
     if resumen_rows:
         _console(pd.DataFrame(resumen_rows).to_string(index=False))
+    if focus_output_path and focus_summary_rows:
+        _console(f"Auditoria marcas clave guardada en: {focus_output_path}")
+        _console(pd.DataFrame(focus_summary_rows).to_string(index=False))
 
 
 if __name__ == "__main__":

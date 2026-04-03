@@ -26,6 +26,11 @@ if errorlevel 1 goto :error_aceite
 "%PYTHON_EXE%" scraper_aceitunas.py --auto >> "%LOG%" 2>&1
 if errorlevel 1 goto :error_aceitunas
 
+call "%ROOT%\auditar_scrape_diario.bat"
+if errorlevel 1 (
+    echo [%date% %time%] AVISO: la auditoria automatica no pudo completarse >> "%LOG%"
+)
+
 echo %date% %time% > "%LAST_UPDATE_FILE%"
 "%POWERSHELL_EXE%" -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd')" > "%ROOT%\last_update_iso.txt"
 if errorlevel 1 (
