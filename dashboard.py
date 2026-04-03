@@ -2469,14 +2469,22 @@ if _page_sel == "🎯  Mi Marca":
             if _mm_sku_sel != "Todos los SKUs":
                 _mm_heat_src = _mm_heat_src[_mm_heat_src["SKU_canonico"] == _mm_sku_sel]
             _mm_heat_src = _mm_heat_src.copy()
+            _mm_heat_src = (_mm_heat_src.sort_values(["Fecha", "Cadena", "SKU_canonico"])
+                            .groupby(["SKU_canonico", "Cadena"], as_index=False)
+                            .tail(1))
             _mm_pres_piv = (_mm_heat_src.groupby(["SKU_canonico","Cadena"])["Precio"]
-                            .mean().round(0).unstack("Cadena"))
+                            .last().round(0).unstack("Cadena"))
             if not _mm_pres_piv.empty:
                 _z_vals  = _mm_pres_piv.values
                 _x_labs  = _mm_pres_piv.columns.tolist()
                 _y_labs  = _mm_pres_piv.index.tolist()
                 _z_flat  = [v for row in _z_vals for v in row if not pd.isna(v)]
                 _z_thresh = (max(_z_flat) * 0.55) if _z_flat else 0
+                _mm_fecha_ref = _mm_heat_src["Fecha"].max()
+                st.markdown(
+                    f'<div class="chart-note">Precio actual por cadena segun la ultima observacion disponible del periodo seleccionado ({_mm_fecha_ref:%d/%m/%Y}).</div>',
+                    unsafe_allow_html=True,
+                )
                 fig_mm_h = go.Figure(go.Heatmap(
                     z=_z_vals, x=_x_labs, y=_y_labs,
                     colorscale="Blues",
