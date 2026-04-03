@@ -1139,6 +1139,14 @@ def sku_canonico_ac(marca: str, variedad: str, gramos, envase: str | None = None
     return " · ".join(partes)
 
 
+def sku_display_ac(variedad: str, gramos, envase: str | None = None) -> str:
+    g_lbl = f"{int(gramos)}g" if gramos and not pd.isna(gramos) else "Sin gramaje"
+    partes = [variedad or "Sin variedad", g_lbl]
+    if envase and envase != "Sin detectar":
+        partes.append(envase)
+    return " · ".join(partes)
+
+
 # ---------------------------------------------------------------------------
 # Configuración de página
 # ---------------------------------------------------------------------------
@@ -3898,11 +3906,16 @@ if active_page == "Mi Marca":
         if _mm_hist_filtered.empty or _mm_metric_brand.empty:
             st.info("Sin datos para esa marca con los filtros actuales.")
         else:
+            for _mm_frame in (_mm_hist_filtered, _mm_dff):
+                _mm_frame["_mm_sku_display"] = _mm_frame.apply(
+                    lambda row: sku_display_ac(row["Variedad"], row["Gramos"], row["Envase"]),
+                    axis=1,
+                )
             _mm_fmt = (lambda v: f"${v:,.0f}/kg") if _mm_mode == "$/kg" else (lambda v: f"${v:,.0f}")
             _mm_avg_brand = _mm_metric_brand["_mm_metric"].mean() if not _mm_metric_brand.empty else 0
             _mm_avg_market = _mm_metric_resto["_mm_metric"].mean() if not _mm_metric_resto.empty else 0
             _mm_prima = ((_mm_avg_brand / _mm_avg_market) - 1) * 100 if _mm_avg_market > 0 else 0
-            _mm_skus = _mm_hist_filtered["SKU_canonico"].nunique()
+            _mm_skus = _mm_hist_filtered["_mm_sku_display"].nunique()
             _mm_cadenas = _mm_hist_filtered["Cadena"].nunique()
             _mm_marca_color = color_marca_real_ac(_mm_sel)
 
@@ -3945,9 +3958,17 @@ if active_page == "Mi Marca":
 
             with st.expander("🏪 Presencia por cadena", expanded=True):
                 _mm_heat_src = _mm_dff.dropna(subset=["Precio"]).copy()
-                _mm_pres_piv = (_mm_heat_src.groupby(["SKU_canonico", "Cadena"])["Precio"]
-                                .mean().round(0).unstack("Cadena"))
+                _mm_heat_src = (_mm_heat_src.sort_values(["Fecha", "Cadena", "_mm_sku_display"])
+                                .groupby(["_mm_sku_display", "Cadena"], as_index=False)
+                                .tail(1))
+                _mm_pres_piv = (_mm_heat_src.groupby(["_mm_sku_display", "Cadena"])["Precio"]
+                                .last().round(0).unstack("Cadena"))
                 if not _mm_pres_piv.empty:
+                    _mm_fecha_ref = _mm_heat_src["Fecha"].max()
+                    st.markdown(
+                        f'<div class="chart-note">Última observación disponible por SKU y cadena dentro del período filtrado ({_mm_fecha_ref:%d/%m/%Y}).</div>',
+                        unsafe_allow_html=True,
+                    )
                     _mm_text = [[f"${v:,.0f}" if not pd.isna(v) else "—" for v in row]
                                 for row in _mm_pres_piv.values]
                     fig_mm_h = go.Figure(go.Heatmap(
@@ -3970,7 +3991,7 @@ if active_page == "Mi Marca":
                     )
                     st.plotly_chart(fig_mm_h, use_container_width=True)
 
-                    _mm_cad_x_sku = (_mm_hist_filtered.groupby("SKU_canonico")["Cadena"]
+                    _mm_cad_x_sku = (_mm_hist_filtered.groupby("_mm_sku_display")["Cadena"]
                                      .nunique().reset_index(name="n_cad")
                                      .sort_values("n_cad", ascending=False))
                     if not _mm_cad_x_sku.empty:
@@ -3980,7 +4001,7 @@ if active_page == "Mi Marca":
                                 st.markdown(
                                     f"<div style='background:#F9FAFB;border-radius:8px;padding:0.55rem 0.7rem;font-size:0.72rem;text-align:center'>"
                                     f"<b style='color:#111827'>{_row_pres['n_cad']}</b><br>"
-                                    f"<span style='color:#6B7280'>{_row_pres['SKU_canonico'][:24]}...</span></div>",
+                                    f"<span style='color:#6B7280'>{_row_pres['_mm_sku_display'][:24]}...</span></div>",
                                     unsafe_allow_html=True,
                                 )
                 else:
@@ -4149,10 +4170,10 @@ if active_page == "Mi Marca":
                     unsafe_allow_html=True,
                 )
                 _mm_ventana_df = _mm_hist_filtered[_mm_hist_filtered["Fecha"].isin(_mm_pres_fechas_sel)]
-                _mm_pres_set = set(zip(_mm_ventana_df["SKU_canonico"], _mm_ventana_df["Cadena"]))
-                _mm_todos_skus = sorted(_mm_hist_filtered["SKU_canonico"].unique())
+                _mm_pres_set = set(zip(_mm_ventana_df["_mm_sku_display"], _mm_ventana_df["Cadena"]))
+                _mm_todos_skus = sorted(_mm_hist_filtered["_mm_sku_display"].unique())
                 _mm_todas_cad = sorted(df_full[df_full["Cadena"].isin(cadenas_sel)]["Cadena"].unique())
-                _mm_hist_set = set(zip(_mm_hist_filtered["SKU_canonico"], _mm_hist_filtered["Cadena"]))
+                _mm_hist_set = set(zip(_mm_hist_filtered["_mm_sku_display"], _mm_hist_filtered["Cadena"]))
                 _mm_pz, _mm_pt = [], []
                 for _sk in _mm_todos_skus:
                     _rz, _rt = [], []
