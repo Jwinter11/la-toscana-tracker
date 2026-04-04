@@ -182,6 +182,33 @@ def _render_shell_css() -> None:
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap');
         html, body, [class*="css"], .stApp { font-family: 'Manrope', sans-serif !important; }
+        html {
+          scrollbar-width: thin;
+          scrollbar-color: #111111 rgba(17, 17, 17, 0.18);
+        }
+        * {
+          scrollbar-width: thin;
+          scrollbar-color: #111111 rgba(17, 17, 17, 0.16);
+        }
+        *::-webkit-scrollbar {
+          width: 12px;
+          height: 12px;
+        }
+        *::-webkit-scrollbar-track {
+          background: rgba(17, 17, 17, 0.12);
+          border-radius: 999px;
+        }
+        *::-webkit-scrollbar-thumb {
+          background: #111111;
+          border-radius: 999px;
+          border: 2px solid rgba(255, 255, 255, 0.22);
+        }
+        *::-webkit-scrollbar-thumb:hover {
+          background: #000000;
+        }
+        *::-webkit-scrollbar-corner {
+          background: rgba(17, 17, 17, 0.12);
+        }
         .stApp {
           background:
             radial-gradient(circle at 10% 18%, rgba(113, 154, 84, 0.14), transparent 28%),
