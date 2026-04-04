@@ -204,7 +204,13 @@ def _render_shell_css() -> None:
           border: 2px solid rgba(255, 255, 255, 0.22);
         }
         *::-webkit-scrollbar-thumb:hover {
-          background: #000000;
+          background: #111111;
+        }
+        *::-webkit-scrollbar-thumb:active {
+          background: #111111;
+        }
+        *::-webkit-scrollbar-thumb:window-inactive {
+          background: #111111;
         }
         *::-webkit-scrollbar-corner {
           background: rgba(17, 17, 17, 0.12);
