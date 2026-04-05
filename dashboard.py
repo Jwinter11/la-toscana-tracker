@@ -1263,11 +1263,11 @@ if _page_sel == "📊  Resumen":
                      .groupby("Marca_raw")["En_oferta"].apply(lambda d: d.mean()*100)
                      .reset_index(name="pct_oferta"))
         _by_marca_ins = _by_marca_ins.merge(_of_ins_r, on="Marca_raw", how="left")
-        _ins_cat = _ins[_ins["Fecha"] == _ins["Fecha"].max()].copy()
-        _cat_stats_i = (_ins_cat.groupby("Categoria").agg(
+        _ins_cad = _ins[_ins["Fecha"] == _ins["Fecha"].max()].copy()
+        _cad_stats_i = (_ins_cad.groupby("Cadena").agg(
             n_marcas=("Marca_raw", "nunique"),
             n_skus=("SKU_canonico", "nunique"),
-        ).reset_index()) if not _ins_cat.empty else pd.DataFrame()
+        ).reset_index()) if not _ins_cad.empty else pd.DataFrame()
         _cad_pl_i = (_ins_pl.groupby(["Cadena","SKU_canonico"])["Precio_litro"].mean().reset_index()
                      .groupby("Cadena")["Precio_litro"].mean().reset_index(name="pl_medio"))
         _cadena_barata_i = _cad_pl_i.sort_values("pl_medio").iloc[0] if not _cad_pl_i.empty else None
@@ -1280,14 +1280,14 @@ if _page_sel == "📊  Resumen":
                      .reset_index(name="n_cad").sort_values("n_cad", ascending=False))
         _marca_mas_skus_i = _sku_por_marca.iloc[0] if not _sku_por_marca.empty else None
         _marca_mas_cad_i  = _sku_cad2.iloc[0]      if not _sku_cad2.empty else None
-        _cat_mas_marcas_i = (_cat_stats_i.sort_values(["n_marcas", "n_skus", "Categoria"], ascending=[False, False, True]).iloc[0]
-                             if not _cat_stats_i.empty else None)
-        _cat_mas_skus_i = (_cat_stats_i.sort_values(["n_skus", "n_marcas", "Categoria"], ascending=[False, False, True]).iloc[0]
-                           if not _cat_stats_i.empty else None)
-        _cat_menos_marcas_i = (_cat_stats_i.sort_values(["n_marcas", "n_skus", "Categoria"], ascending=[True, True, True]).iloc[0]
-                               if not _cat_stats_i.empty else None)
-        _cat_menos_skus_i = (_cat_stats_i.sort_values(["n_skus", "n_marcas", "Categoria"], ascending=[True, True, True]).iloc[0]
-                             if not _cat_stats_i.empty else None)
+        _cad_mas_marcas_i = (_cad_stats_i.sort_values(["n_marcas", "n_skus", "Cadena"], ascending=[False, False, True]).iloc[0]
+                             if not _cad_stats_i.empty else None)
+        _cad_mas_skus_i = (_cad_stats_i.sort_values(["n_skus", "n_marcas", "Cadena"], ascending=[False, False, True]).iloc[0]
+                           if not _cad_stats_i.empty else None)
+        _cad_menos_marcas_i = (_cad_stats_i.sort_values(["n_marcas", "n_skus", "Cadena"], ascending=[True, True, True]).iloc[0]
+                               if not _cad_stats_i.empty else None)
+        _cad_menos_skus_i = (_cad_stats_i.sort_values(["n_skus", "n_marcas", "Cadena"], ascending=[True, True, True]).iloc[0]
+                             if not _cad_stats_i.empty else None)
 
         st.markdown('<div class="chart-title">📦 Portfolio activo &nbsp;·&nbsp; 🏬 Cadenas</div>', unsafe_allow_html=True)
         _ri1a, _ri1b, _ri1c, _ri1d = st.columns(4, gap="medium")
@@ -1340,24 +1340,24 @@ if _page_sel == "📊  Resumen":
                               f"{_co_i['pct']:.0f}% de sus productos en oferta","#B45309")
 
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown('<div class="chart-title">🧩 Categorias activas · Foto actual</div>', unsafe_allow_html=True)
+        st.markdown('<div class="chart-title">🧩 Cadenas activas · Foto actual</div>', unsafe_allow_html=True)
         _ri3a, _ri3b, _ri3c, _ri3d = st.columns(4, gap="medium")
         with _ri3a:
-            if _cat_mas_marcas_i is not None:
-                _insight_card("🌐", "Categoria con mas marcas", _cat_mas_marcas_i["Categoria"],
-                              f"{int(_cat_mas_marcas_i['n_marcas'])} marcas · {int(_cat_mas_marcas_i['n_skus'])} SKUs", "#0F766E")
+            if _cad_mas_marcas_i is not None:
+                _insight_card("🌐", "Cadena con mas marcas", _cad_mas_marcas_i["Cadena"],
+                              f"{int(_cad_mas_marcas_i['n_marcas'])} marcas · {int(_cad_mas_marcas_i['n_skus'])} SKUs", "#0F766E")
         with _ri3b:
-            if _cat_mas_skus_i is not None:
-                _insight_card("📦", "Categoria con mas SKUs", _cat_mas_skus_i["Categoria"],
-                              f"{int(_cat_mas_skus_i['n_skus'])} SKUs · {int(_cat_mas_skus_i['n_marcas'])} marcas", "#1D4ED8")
+            if _cad_mas_skus_i is not None:
+                _insight_card("📦", "Cadena con mas SKUs", _cad_mas_skus_i["Cadena"],
+                              f"{int(_cad_mas_skus_i['n_skus'])} SKUs · {int(_cad_mas_skus_i['n_marcas'])} marcas", "#1D4ED8")
         with _ri3c:
-            if _cat_menos_marcas_i is not None:
-                _insight_card("🔎", "Categoria con menos marcas", _cat_menos_marcas_i["Categoria"],
-                              f"{int(_cat_menos_marcas_i['n_marcas'])} marcas · {int(_cat_menos_marcas_i['n_skus'])} SKUs", "#B45309")
+            if _cad_menos_marcas_i is not None:
+                _insight_card("🔎", "Cadena con menos marcas", _cad_menos_marcas_i["Cadena"],
+                              f"{int(_cad_menos_marcas_i['n_marcas'])} marcas · {int(_cad_menos_marcas_i['n_skus'])} SKUs", "#B45309")
         with _ri3d:
-            if _cat_menos_skus_i is not None:
-                _insight_card("📉", "Categoria con menos SKUs", _cat_menos_skus_i["Categoria"],
-                              f"{int(_cat_menos_skus_i['n_skus'])} SKUs · {int(_cat_menos_skus_i['n_marcas'])} marcas", "#7C3AED")
+            if _cad_menos_skus_i is not None:
+                _insight_card("📉", "Cadena con menos SKUs", _cad_menos_skus_i["Cadena"],
+                              f"{int(_cad_menos_skus_i['n_skus'])} SKUs · {int(_cad_menos_skus_i['n_marcas'])} marcas", "#7C3AED")
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 2 · POR CADENA
