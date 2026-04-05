@@ -818,6 +818,7 @@ from dashboard_unificado_helpers import (
     unified_mode_enabled,
 )
 from tracker_paths import precios_db_path
+from tracker_copy_helpers import olive_brand
 
 DIRECTORIO = Path(__file__).parent
 DB_PATH = precios_db_path()
@@ -910,6 +911,7 @@ _MARCA_CORRECCIONES: dict[str, str] = {
     "Malagueña":        "La Malagueña",
     "Malague\xf1a":     "La Malagueña",   # encoding fix
 }
+_MARCA_CORRECCIONES_NORM = {_normalizar_ac(k): v for k, v in _MARCA_CORRECCIONES.items()}
 
 # Extracciones del scraper que NO son marcas (alimentos, descriptores, preparaciones)
 # → se descartan y quedan como Marca Propia de la cadena
@@ -932,17 +934,30 @@ _PALABRAS_NO_MARCA: set[str] = {
     # Palabras genéricas
     "Aceitunas", "Aceitunas.verdes",
 }
+_PALABRAS_NO_MARCA_NORM = {_normalizar_ac(p) for p in _PALABRAS_NO_MARCA}
 
 
-def limpiar_marca_ac(marca: str, cadena: str) -> str:
+def limpiar_marca_ac(marca: str, cadena: str, nombre: str = "") -> str:
     """Corrige el nombre de marca extraído por el scraper."""
+    marca = (marca or "").strip()
+    marca_norm = _normalizar_ac(marca)
+    if not marca:
+        inferida = olive_brand(nombre) if nombre else ""
+        inferida_norm = _normalizar_ac(inferida)
+        if inferida and inferida_norm not in _PALABRAS_NO_MARCA_NORM:
+            return _MARCA_CORRECCIONES_NORM.get(inferida_norm, inferida)
+        return "Otra"
     # Correcciones directas
-    if marca in _MARCA_CORRECCIONES:
-        return _MARCA_CORRECCIONES[marca]
-    # Palabras que no son marcas (ingredientes, descriptores) → Marca Propia de la cadena
-    if marca in _PALABRAS_NO_MARCA:
+    if marca_norm in _MARCA_CORRECCIONES_NORM:
+        return _MARCA_CORRECCIONES_NORM[marca_norm]
+    # Palabras que no son marcas (ingredientes, descriptores) → Marca real del nombre o Marca Propia
+    if marca_norm in _PALABRAS_NO_MARCA_NORM:
+        inferida = olive_brand(nombre) if nombre else ""
+        inferida_norm = _normalizar_ac(inferida)
+        if inferida and inferida_norm not in _PALABRAS_NO_MARCA_NORM and inferida_norm != marca_norm:
+            return _MARCA_CORRECCIONES_NORM.get(inferida_norm, inferida)
         return cadena
-    return marca
+    return _MARCA_CORRECCIONES_NORM.get(marca_norm, marca)
 
 
 def categorizar_marca_ac(marca: str) -> str:
@@ -1643,7 +1658,7 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
         if not es_producto_aceituna(r["nombre"]):
             continue
         cadena  = r["supermercado"]
-        marca   = limpiar_marca_ac(r["marca"] or "Desconocida", cadena)
+        marca   = limpiar_marca_ac(r["marca"] or "Desconocida", cadena, r["nombre"] or "")
         var_raw = ajustar_variedad_raw_ac(r["nombre"] or "", r["variedad"] or "Verde")
         g       = buscar_gramaje_unificado_catalogo(
             cadena,
@@ -1665,6 +1680,7 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
             "Cadena":             r["supermercado"],
             "Marca":              marca,
             "Marca_cat":          marca_cat,
+            "Categoria":          var_unif,
             "Producto":           r["nombre"],
             "Variedad":           var_unif,
             "Variedad_raw":       var_raw,
@@ -2442,6 +2458,18 @@ if active_page == "Resumen":
                        ]
                        .groupby("Marca")["En_oferta"].mean().mul(100)
                        .reset_index(name="pct").sort_values("pct", ascending=False))
+        _cat_stats = (_ins.groupby("Categoria").agg(
+            n_marcas=("Marca", "nunique"),
+            n_skus=("SKU_canonico", "nunique"),
+        ).reset_index()) if not _ins.empty else pd.DataFrame()
+        _cat_mas_marcas = (_cat_stats.sort_values(["n_marcas", "n_skus", "Categoria"], ascending=[False, False, True]).iloc[0]
+                           if not _cat_stats.empty else None)
+        _cat_mas_skus = (_cat_stats.sort_values(["n_skus", "n_marcas", "Categoria"], ascending=[False, False, True]).iloc[0]
+                         if not _cat_stats.empty else None)
+        _cat_menos_marcas = (_cat_stats.sort_values(["n_marcas", "n_skus", "Categoria"], ascending=[True, True, True]).iloc[0]
+                             if not _cat_stats.empty else None)
+        _cat_menos_skus = (_cat_stats.sort_values(["n_skus", "n_marcas", "Categoria"], ascending=[True, True, True]).iloc[0]
+                           if not _cat_stats.empty else None)
 
         _ri1, _ri2, _ri3, _ri4 = st.columns(4, gap="medium")
         with _ri1:
@@ -2485,6 +2513,29 @@ if active_page == "Resumen":
             _n_skus_dest   = dff[dff["Marca_cat"].isin(MARCAS_DESTACADAS_AC)]["SKU_canonico"].nunique()
             _insight_card("🏷️", "Marcas destacadas",
                           f"{_n_marcas_dest} presentes", f"{_n_skus_dest} SKUs distintos", "#2E86AB")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        _ri9, _ri10, _ri11, _ri12 = st.columns(4, gap="medium")
+        with _ri9:
+            if _cat_mas_marcas is not None:
+                _insight_card("🌐", "Categoria con mas marcas",
+                              str(_cat_mas_marcas["Categoria"]),
+                              f"{int(_cat_mas_marcas['n_marcas'])} marcas · {int(_cat_mas_marcas['n_skus'])} SKUs", "#0F766E")
+        with _ri10:
+            if _cat_mas_skus is not None:
+                _insight_card("📦", "Categoria con mas SKUs",
+                              str(_cat_mas_skus["Categoria"]),
+                              f"{int(_cat_mas_skus['n_skus'])} SKUs · {int(_cat_mas_skus['n_marcas'])} marcas", "#1D4ED8")
+        with _ri11:
+            if _cat_menos_marcas is not None:
+                _insight_card("🔎", "Categoria con menos marcas",
+                              str(_cat_menos_marcas["Categoria"]),
+                              f"{int(_cat_menos_marcas['n_marcas'])} marcas · {int(_cat_menos_marcas['n_skus'])} SKUs", "#B45309")
+        with _ri12:
+            if _cat_menos_skus is not None:
+                _insight_card("📉", "Categoria con menos SKUs",
+                              str(_cat_menos_skus["Categoria"]),
+                              f"{int(_cat_menos_skus['n_skus'])} SKUs · {int(_cat_menos_skus['n_marcas'])} marcas", "#7C3AED")
 
     # ── Distribución general ─────────────────────────────────────────────
     st.markdown("---")

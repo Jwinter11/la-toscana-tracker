@@ -100,6 +100,23 @@ def bucket_gramaje(ml) -> str | None:
             return etiq
     return None
 
+
+def categoria_aceite(nombre: str) -> str:
+    n = _norm_sku(nombre or "")
+    if re.search(r"con\s+aji|aji\s+picante|con\s+albahaca|con\s+limon|con\s+ajo\b", n):
+        return "Saborizados"
+    if re.search(r"cosecha\s+tardia|cosecha\s+temprana", n):
+        return "Cosechas especiales"
+    if re.search(r"changlot|coratina|arbequina", n):
+        return "Monovarietales"
+    if re.search(r"organico|organica", n):
+        return "Organicos"
+    if re.search(r"lata|aerosol|rocio\s+vegetal|\bbox\b", n):
+        return "Formatos especiales"
+    if re.search(r"sin\s+tacc|suave|intenso|fuerte|mediterraneo|andino", n):
+        return "Especialidades"
+    return "Clasicos"
+
 # ── Canonicalización de SKU ───────────────────────────────────────────────
 def _norm_sku(s: str) -> str:
     s = s.lower()
@@ -730,6 +747,7 @@ def cargar_datos(_mtime=None) -> pd.DataFrame:
                 "Cadena":        superm,
                 "Marca_raw":     marca_r,
                 "Marca":         categorizar(marca_r),
+                "Categoria":     categoria_aceite(r["nombre"]),
                 "Producto":      r["nombre"],
                 "SKU_canonico":  canonicalizar_sku(marca_r, r["nombre"], ml),
                 "Tamaño_ml":     ml,
@@ -766,6 +784,7 @@ def cargar_datos(_mtime=None) -> pd.DataFrame:
                     "Cadena":        superm,
                     "Marca_raw":     marca_r,
                     "Marca":         categorizar(marca_r),
+                    "Categoria":     categoria_aceite(p["nombre"]),
                     "Producto":      p["nombre"],
                     "SKU_canonico":  canonicalizar_sku(marca_r, p["nombre"], ml),
                     "Tamaño_ml":     ml,
@@ -1244,6 +1263,11 @@ if _page_sel == "📊  Resumen":
                      .groupby("Marca_raw")["En_oferta"].apply(lambda d: d.mean()*100)
                      .reset_index(name="pct_oferta"))
         _by_marca_ins = _by_marca_ins.merge(_of_ins_r, on="Marca_raw", how="left")
+        _ins_cat = _ins[_ins["Fecha"] == _ins["Fecha"].max()].copy()
+        _cat_stats_i = (_ins_cat.groupby("Categoria").agg(
+            n_marcas=("Marca_raw", "nunique"),
+            n_skus=("SKU_canonico", "nunique"),
+        ).reset_index()) if not _ins_cat.empty else pd.DataFrame()
         _cad_pl_i = (_ins_pl.groupby(["Cadena","SKU_canonico"])["Precio_litro"].mean().reset_index()
                      .groupby("Cadena")["Precio_litro"].mean().reset_index(name="pl_medio"))
         _cadena_barata_i = _cad_pl_i.sort_values("pl_medio").iloc[0] if not _cad_pl_i.empty else None
@@ -1256,6 +1280,14 @@ if _page_sel == "📊  Resumen":
                      .reset_index(name="n_cad").sort_values("n_cad", ascending=False))
         _marca_mas_skus_i = _sku_por_marca.iloc[0] if not _sku_por_marca.empty else None
         _marca_mas_cad_i  = _sku_cad2.iloc[0]      if not _sku_cad2.empty else None
+        _cat_mas_marcas_i = (_cat_stats_i.sort_values(["n_marcas", "n_skus", "Categoria"], ascending=[False, False, True]).iloc[0]
+                             if not _cat_stats_i.empty else None)
+        _cat_mas_skus_i = (_cat_stats_i.sort_values(["n_skus", "n_marcas", "Categoria"], ascending=[False, False, True]).iloc[0]
+                           if not _cat_stats_i.empty else None)
+        _cat_menos_marcas_i = (_cat_stats_i.sort_values(["n_marcas", "n_skus", "Categoria"], ascending=[True, True, True]).iloc[0]
+                               if not _cat_stats_i.empty else None)
+        _cat_menos_skus_i = (_cat_stats_i.sort_values(["n_skus", "n_marcas", "Categoria"], ascending=[True, True, True]).iloc[0]
+                             if not _cat_stats_i.empty else None)
 
         st.markdown('<div class="chart-title">📦 Portfolio activo &nbsp;·&nbsp; 🏬 Cadenas</div>', unsafe_allow_html=True)
         _ri1a, _ri1b, _ri1c, _ri1d = st.columns(4, gap="medium")
@@ -1306,6 +1338,26 @@ if _page_sel == "📊  Resumen":
                 _co_i = _cad_of_i.iloc[0]
                 _insight_card("🏪","Cadena con más ofertas", _co_i["Cadena"],
                               f"{_co_i['pct']:.0f}% de sus productos en oferta","#B45309")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<div class="chart-title">🧩 Categorias activas · Foto actual</div>', unsafe_allow_html=True)
+        _ri3a, _ri3b, _ri3c, _ri3d = st.columns(4, gap="medium")
+        with _ri3a:
+            if _cat_mas_marcas_i is not None:
+                _insight_card("🌐", "Categoria con mas marcas", _cat_mas_marcas_i["Categoria"],
+                              f"{int(_cat_mas_marcas_i['n_marcas'])} marcas · {int(_cat_mas_marcas_i['n_skus'])} SKUs", "#0F766E")
+        with _ri3b:
+            if _cat_mas_skus_i is not None:
+                _insight_card("📦", "Categoria con mas SKUs", _cat_mas_skus_i["Categoria"],
+                              f"{int(_cat_mas_skus_i['n_skus'])} SKUs · {int(_cat_mas_skus_i['n_marcas'])} marcas", "#1D4ED8")
+        with _ri3c:
+            if _cat_menos_marcas_i is not None:
+                _insight_card("🔎", "Categoria con menos marcas", _cat_menos_marcas_i["Categoria"],
+                              f"{int(_cat_menos_marcas_i['n_marcas'])} marcas · {int(_cat_menos_marcas_i['n_skus'])} SKUs", "#B45309")
+        with _ri3d:
+            if _cat_menos_skus_i is not None:
+                _insight_card("📉", "Categoria con menos SKUs", _cat_menos_skus_i["Categoria"],
+                              f"{int(_cat_menos_skus_i['n_skus'])} SKUs · {int(_cat_menos_skus_i['n_marcas'])} marcas", "#7C3AED")
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 2 · POR CADENA
