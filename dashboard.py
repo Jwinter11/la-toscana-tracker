@@ -958,8 +958,18 @@ mask_base = (
     (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(gram_sel))
 )
 
+mask_kpi = (
+    df_full["Cadena"].isin(cadenas_sel) &
+    df_full["Marca"].isin(cats_sel) &
+    (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(gram_sel))
+)
+
 dff   = df_full[mask_base].copy()          # todos, precio siempre = góndola
 df_of = df_full[mask_base & df_full["En_oferta"]].copy()  # solo ofertas
+df_kpi_all = df_full[mask_kpi].copy()
+_fecha_kpi = df_kpi_all["Fecha"].max() if not df_kpi_all.empty else df_full["Fecha"].max()
+df_kpi = df_kpi_all[df_kpi_all["Fecha"] == _fecha_kpi].copy() if not df_kpi_all.empty else pd.DataFrame()
+df_of_kpi = df_kpi[df_kpi["En_oferta"]].copy() if not df_kpi.empty else pd.DataFrame()
 
 df_ult        = df_full[df_full["Fecha"] == df_full["Fecha"].max()].copy()
 n_sem         = df_full["Periodo"].nunique()
@@ -986,19 +996,19 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── KPIs ──────────────────────────────────────────────────────────────────
-precio_prom   = dff["Precio"].mean()
-pl_prom       = dff["Precio_litro"].dropna().mean()
-cadena_barata = (dff.dropna(subset=["Precio_litro"])
+precio_prom   = df_kpi["Precio"].mean()
+pl_prom       = df_kpi["Precio_litro"].dropna().mean()
+cadena_barata = (df_kpi.dropna(subset=["Precio_litro"])
                     .groupby("Cadena")["Precio_litro"].mean().idxmin()
-                 if not dff["Precio_litro"].dropna().empty else "—")
-n_en_oferta  = len(df_of)
-pct_oferta   = n_en_oferta / len(df_full[mask_base]) * 100 if len(df_full[mask_base]) > 0 else 0
-desc_prom_v  = df_of["Descuento_pct"].mean() if not df_of.empty else 0
-ahorro_prom  = (df_of["Precio"] - df_of["Precio_oferta"]).mean() if not df_of.empty else 0
+                 if not df_kpi["Precio_litro"].dropna().empty else "—")
+n_en_oferta  = len(df_of_kpi)
+pct_oferta   = n_en_oferta / max(len(df_kpi), 1) * 100
+desc_prom_v  = df_of_kpi["Descuento_pct"].mean() if not df_of_kpi.empty else 0
+ahorro_prom  = (df_of_kpi["Precio"] - df_of_kpi["Precio_oferta"]).mean() if not df_of_kpi.empty else 0
 
 c1,c2,c3,c4,c5,c6 = st.columns(6)
 kpis = [
-    ("blue",   "Productos relevados",    f"{dff['SKU_canonico'].nunique():,}", f"{dff['Cadena'].nunique()} cadenas"),
+    ("blue",   "Productos relevados",    f"{df_kpi['SKU_canonico'].nunique():,}", f"{df_kpi['Cadena'].nunique()} cadenas · última corrida"),
     ("green",  "Precio prom. góndola",f"${precio_prom:,.0f}",     "precio sin descuento"),
     ("orange", "Precio/litro prom.",  f"${pl_prom:,.0f}" if pl_prom else "—", "promedio por litro"),
     ("purple", "Cadena más barata",   cadena_barata,               "menor precio/litro"),

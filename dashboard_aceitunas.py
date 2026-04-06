@@ -2017,8 +2017,19 @@ mask_base = (
     & df_full["Envase"].isin(envases_sel)
 )
 
+mask_kpi = (
+    df_full["Cadena"].isin(cadenas_sel)
+    & df_full["Variedad"].isin(variedades_sel)
+    & (df_full["Gramaje"].isna() | df_full["Gramaje"].isin(buckets_sel))
+    & df_full["Envase"].isin(envases_sel)
+)
+
 dff   = df_full[mask_base].copy()
 df_of = df_full[mask_base & df_full["En_oferta"]].copy()
+df_kpi_all = df_full[mask_kpi].copy()
+_fecha_kpi = df_kpi_all["Fecha"].max() if not df_kpi_all.empty else df_full["Fecha"].max()
+df_kpi = df_kpi_all[df_kpi_all["Fecha"] == _fecha_kpi].copy() if not df_kpi_all.empty else pd.DataFrame()
+df_of_kpi = df_kpi[df_kpi["En_oferta"]].copy() if not df_kpi.empty else pd.DataFrame()
 df_ult = df_full[df_full["Fecha"] == df_full["Fecha"].max()].copy()
 
 # Métrica seleccionada en sidebar
@@ -2084,15 +2095,15 @@ st.markdown(f"""
 # ── TAB 1: Resumen ────────────────────────────────────────────────────────
 if active_page == "Resumen":
     # ── KPIs ─────────────────────────────────────────────────────────────
-    dff_g        = dff.dropna(subset=["Precio_100g"])
-    precio_prom  = dff["Precio"].mean()
+    dff_g        = df_kpi.dropna(subset=["Precio_100g"])
+    precio_prom  = df_kpi["Precio"].mean()
     pkg_prom     = dff_g["Precio_100g"].mean() * 10
     p100_min     = dff_g.groupby("Cadena")["Precio_100g"].mean()
     cadena_barata = p100_min.idxmin() if not p100_min.empty else "—"
-    n_oferta     = len(df_of)
-    pct_of       = n_oferta / max(len(dff), 1) * 100
-    desc_prom    = df_of["Descuento_pct"].mean() if not df_of.empty else 0
-    ahorro_prom  = (df_of["Precio"] - df_of["Precio_oferta"]).mean() if not df_of.empty else 0
+    n_oferta     = len(df_of_kpi)
+    pct_of       = n_oferta / max(len(df_kpi), 1) * 100
+    desc_prom    = df_of_kpi["Descuento_pct"].mean() if not df_of_kpi.empty else 0
+    ahorro_prom  = (df_of_kpi["Precio"] - df_of_kpi["Precio_oferta"]).mean() if not df_of_kpi.empty else 0
     variedad_top = dff["Variedad"].value_counts().idxmax() if not dff.empty else "—"
     marcas_n     = dff["Marca_cat"].nunique()
 
@@ -2107,7 +2118,7 @@ if active_page == "Resumen":
         ("yellow", "Dto. prom.",        f"{desc_prom:.0f}%" if desc_prom > 0 else "—", f"{marcas_n} marcas"),
     ]
     kpis = [
-        ("blue",   "Productos relevados", f"{dff['SKU_canonico'].nunique():,}", f"{dff['Cadena'].nunique()} cadenas"),
+        ("blue",   "Productos relevados", f"{df_kpi['SKU_canonico'].nunique():,}", f"{df_kpi['Cadena'].nunique()} cadenas · ultima corrida"),
         ("green",  "Precio prom. góndola", f"${precio_prom:,.0f}" if pd.notna(precio_prom) else "—", "precio sin descuento"),
         ("orange", "Precio/kg prom.", f"${pkg_prom:,.0f}" if pd.notna(pkg_prom) else "—", "promedio por kilo"),
         ("purple", "Cadena más barata", cadena_barata, "menor precio/kg"),
