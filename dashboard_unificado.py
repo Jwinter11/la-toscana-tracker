@@ -14,19 +14,18 @@ from pathlib import Path
 
 import streamlit as st
 
-from dashboard_unificado_helpers import (
-    SECTION_KEY,
-    UNIFIED_MODE_ENV,
-    current_section,
-    ensure_session_schema,
-    switch_section,
-)
+import dashboard_unificado_helpers as _unified_helpers
 from tracker_paths import historial_path, precios_db_path
 
 DIRECTORIO = Path(__file__).parent
 DB_PATH = precios_db_path()
 HISTORIAL_PATH = historial_path()
 _MAX_INTENTOS = 5
+SECTION_KEY = _unified_helpers.SECTION_KEY
+UNIFIED_MODE_ENV = _unified_helpers.UNIFIED_MODE_ENV
+current_section = _unified_helpers.current_section
+switch_section = _unified_helpers.switch_section
+ensure_session_schema = getattr(_unified_helpers, "ensure_session_schema", lambda default_section="inicio": None)
 
 st.set_page_config(
     page_title="La Toscana Tracker | Aceite + Aceitunas",

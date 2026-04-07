@@ -15,19 +15,19 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from dashboard_unificado_helpers import (
-    COMMON_DASHBOARD_SECTIONS,
-    NAV_WIDGET_VERSION,
-    PLOTLY_FONT_FAMILY,
-    ensure_session_schema,
-    render_sidebar_section_switcher,
-    unified_mode_enabled,
-)
+import dashboard_unificado_helpers as _unified_helpers
 from tracker_paths import historial_path, precios_db_path
 
 DIRECTORIO = Path(__file__).parent
 DB_PATH = precios_db_path()
 HISTORIAL_PATH = historial_path()
+COMMON_DASHBOARD_SECTIONS = _unified_helpers.COMMON_DASHBOARD_SECTIONS
+NAV_WIDGET_VERSION = _unified_helpers.NAV_WIDGET_VERSION
+PLOTLY_FONT_FAMILY = _unified_helpers.PLOTLY_FONT_FAMILY
+render_sidebar_section_switcher = _unified_helpers.render_sidebar_section_switcher
+unified_mode_enabled = _unified_helpers.unified_mode_enabled
+ensure_session_schema = getattr(_unified_helpers, "ensure_session_schema", lambda default_section="inicio": None)
+
 UNIFIED_MODE = unified_mode_enabled()
 
 _MESES_CORTOS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]

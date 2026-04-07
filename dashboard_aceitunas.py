@@ -803,6 +803,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
+import dashboard_unificado_helpers as _unified_helpers
 from aceitunas_catalogo_manual import (
     ENVASES_VALIDOS,
     buscar_gramaje_unificado_catalogo,
@@ -810,19 +811,18 @@ from aceitunas_catalogo_manual import (
     gramaje_grupo_label_aceituna,
     resolver_envase_catalogo,
 )
-from dashboard_unificado_helpers import (
-    COMMON_DASHBOARD_SECTIONS,
-    NAV_WIDGET_VERSION,
-    PLOTLY_FONT_FAMILY,
-    ensure_session_schema,
-    render_sidebar_section_switcher,
-    unified_mode_enabled,
-)
 from tracker_paths import precios_db_path
 from tracker_copy_helpers import olive_brand
 
 DIRECTORIO = Path(__file__).parent
 DB_PATH = precios_db_path()
+COMMON_DASHBOARD_SECTIONS = _unified_helpers.COMMON_DASHBOARD_SECTIONS
+NAV_WIDGET_VERSION = _unified_helpers.NAV_WIDGET_VERSION
+PLOTLY_FONT_FAMILY = _unified_helpers.PLOTLY_FONT_FAMILY
+render_sidebar_section_switcher = _unified_helpers.render_sidebar_section_switcher
+unified_mode_enabled = _unified_helpers.unified_mode_enabled
+ensure_session_schema = getattr(_unified_helpers, "ensure_session_schema", lambda default_section="inicio": None)
+
 UNIFIED_MODE = unified_mode_enabled()
 
 _MESES_CORTOS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
