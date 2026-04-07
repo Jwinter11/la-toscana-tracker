@@ -791,6 +791,7 @@ if False and active_page == "Comparativa":
                                                      font=dict(size=12, color="#6B7280"), x=0.01))
                         st.plotly_chart(fig, use_container_width=True)
 
+import inspect
 import math
 import re
 import sqlite3
@@ -1669,6 +1670,41 @@ def _db_mtime():
     return DB_PATH.stat().st_mtime if DB_PATH.exists() else 0
 
 
+def _buscar_gramaje_unificado_catalogo_compat(
+    supermercado: str,
+    nombre: str,
+    producto_id,
+    marca: str,
+    variedad: str,
+    gramos,
+    url: str | None = None,
+):
+    try:
+        total_params = len(inspect.signature(buscar_gramaje_unificado_catalogo).parameters)
+    except (TypeError, ValueError):
+        total_params = 7
+
+    if total_params >= 7:
+        return buscar_gramaje_unificado_catalogo(
+            supermercado,
+            nombre,
+            producto_id,
+            marca,
+            variedad,
+            gramos,
+            url or "",
+        )
+
+    return buscar_gramaje_unificado_catalogo(
+        supermercado,
+        nombre,
+        producto_id,
+        marca,
+        variedad,
+        gramos,
+    )
+
+
 @st.cache_data(ttl=3600)
 def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
     if not DB_PATH.exists():
@@ -1691,7 +1727,7 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
         cadena  = r["supermercado"]
         marca   = limpiar_marca_ac(r["marca"] or "Desconocida", cadena, r["nombre"] or "")
         var_raw = ajustar_variedad_raw_ac(r["nombre"] or "", r["variedad"] or "Verde")
-        g       = buscar_gramaje_unificado_catalogo(
+        g       = _buscar_gramaje_unificado_catalogo_compat(
             cadena,
             r["nombre"] or "",
             r["producto_id"],

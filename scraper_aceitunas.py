@@ -4,6 +4,7 @@ Uso: python scraper_aceitunas.py
 """
 
 import io
+import inspect
 import os
 import re
 import sqlite3
@@ -457,11 +458,46 @@ def precio_por_100g(precio: float, gramos: int | None) -> int | None:
     return None
 
 
+def _buscar_gramaje_unificado_catalogo_compat(
+    supermercado: str,
+    nombre: str,
+    producto_id,
+    marca: str,
+    variedad: str,
+    gramos,
+    url: str | None = None,
+):
+    try:
+        total_params = len(inspect.signature(buscar_gramaje_unificado_catalogo).parameters)
+    except (TypeError, ValueError):
+        total_params = 7
+
+    if total_params >= 7:
+        return buscar_gramaje_unificado_catalogo(
+            supermercado,
+            nombre,
+            producto_id,
+            marca,
+            variedad,
+            gramos,
+            url or "",
+        )
+
+    return buscar_gramaje_unificado_catalogo(
+        supermercado,
+        nombre,
+        producto_id,
+        marca,
+        variedad,
+        gramos,
+    )
+
+
 def aplicar_catalogo_gramajes(productos: list[dict]) -> list[dict]:
     ajustados: list[dict] = []
     for p in productos:
         g_actual = p.get("gramos_sin_escurrir")
-        g_unificado = buscar_gramaje_unificado_catalogo(
+        g_unificado = _buscar_gramaje_unificado_catalogo_compat(
             p.get("supermercado", ""),
             p.get("nombre", ""),
             p.get("producto_id"),
