@@ -6,7 +6,9 @@ import streamlit as st
 
 UNIFIED_MODE_ENV = "ACEITE_TRACKER_UNIFIED_MODE"
 SECTION_KEY = "suite_section"
-_PRESERVE_KEYS = {SECTION_KEY, "_pwd_ok", "_intentos"}
+SESSION_SCHEMA_KEY = "_session_schema_version"
+SESSION_SCHEMA_VERSION = "2026-04-06-v1"
+_PRESERVE_KEYS = {SECTION_KEY, "_pwd_ok", "_intentos", SESSION_SCHEMA_KEY}
 COMMON_DASHBOARD_SECTIONS = [
     "📊  Resumen",
     "🏪  Por Cadena",
@@ -19,7 +21,7 @@ COMMON_DASHBOARD_SECTIONS = [
     "🔢  Tabla dinámica",
 ]
 PLOTLY_FONT_FAMILY = "Montserrat"
-NAV_WIDGET_VERSION = "v2"
+NAV_WIDGET_VERSION = "v3"
 
 
 def unified_mode_enabled() -> bool:
@@ -28,6 +30,27 @@ def unified_mode_enabled() -> bool:
 
 def current_section(default: str = "inicio") -> str:
     return st.session_state.get(SECTION_KEY, default)
+
+
+def ensure_session_schema(default_section: str = "inicio") -> None:
+    if st.session_state.get(SESSION_SCHEMA_KEY) == SESSION_SCHEMA_VERSION:
+        return
+
+    preserved = {
+        key: st.session_state[key]
+        for key in (SECTION_KEY, "_pwd_ok", "_intentos")
+        if key in st.session_state
+    }
+    valid_sections = {"inicio", "aceite", "aceitunas"}
+    if preserved.get(SECTION_KEY) not in valid_sections:
+        preserved[SECTION_KEY] = default_section
+
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+
+    st.session_state.update(preserved)
+    st.session_state[SESSION_SCHEMA_KEY] = SESSION_SCHEMA_VERSION
+    st.rerun()
 
 
 def switch_section(section: str) -> None:

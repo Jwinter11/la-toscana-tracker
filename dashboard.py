@@ -19,6 +19,7 @@ from dashboard_unificado_helpers import (
     COMMON_DASHBOARD_SECTIONS,
     NAV_WIDGET_VERSION,
     PLOTLY_FONT_FAMILY,
+    ensure_session_schema,
     render_sidebar_section_switcher,
     unified_mode_enabled,
 )
@@ -198,6 +199,8 @@ if not UNIFIED_MODE:
                        page_icon="🫒", layout="wide", initial_sidebar_state="expanded")
 
 # ── Protección por contraseña ─────────────────────────────────────────────
+ensure_session_schema(default_section="aceite")
+
 _MAX_INTENTOS = 5
 
 def _check_password():

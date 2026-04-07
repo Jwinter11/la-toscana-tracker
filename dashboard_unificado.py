@@ -18,6 +18,7 @@ from dashboard_unificado_helpers import (
     SECTION_KEY,
     UNIFIED_MODE_ENV,
     current_section,
+    ensure_session_schema,
     switch_section,
 )
 from tracker_paths import historial_path, precios_db_path
@@ -33,6 +34,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+ensure_session_schema(default_section="inicio")
 
 
 def _check_password() -> None:

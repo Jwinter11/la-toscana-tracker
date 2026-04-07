@@ -814,6 +814,7 @@ from dashboard_unificado_helpers import (
     COMMON_DASHBOARD_SECTIONS,
     NAV_WIDGET_VERSION,
     PLOTLY_FONT_FAMILY,
+    ensure_session_schema,
     render_sidebar_section_switcher,
     unified_mode_enabled,
 )
@@ -1253,6 +1254,8 @@ if not UNIFIED_MODE:
 # ---------------------------------------------------------------------------
 # Contraseña
 # ---------------------------------------------------------------------------
+
+ensure_session_schema(default_section="aceitunas")
 
 _MAX_INTENTOS = 5
 
