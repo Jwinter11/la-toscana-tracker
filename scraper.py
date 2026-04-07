@@ -965,6 +965,210 @@ def scrape_coto(headless: bool = False) -> list[dict]:
     return productos
 
 
+# Reemplazo robusto: reintenta la corrida completa de Coto y rechaza fotos parciales.
+def _coto_umbral_minimo() -> int:
+    try:
+        import sqlite3
+
+        if not DB_PATH.exists():
+            return 70
+
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        rows = cur.execute("""
+            SELECT COUNT(*) AS n
+            FROM precios
+            WHERE supermercado = 'Coto' AND fecha < ?
+            GROUP BY fecha
+            HAVING n > 0
+            ORDER BY fecha DESC
+            LIMIT 7
+        """, (str(date.today()),)).fetchall()
+        conn.close()
+
+        counts = sorted(int(r[0]) for r in rows if r and r[0])
+        if not counts:
+            return 70
+        mediana = counts[len(counts) // 2]
+        return max(70, int(mediana * 0.75))
+    except Exception:
+        return 70
+
+
+def _scrape_coto_once_retry(headless: bool = False) -> tuple[list[dict], bool, str]:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  [Coto] Playwright no instalado. Saltando.")
+        return [], False, "playwright no instalado"
+
+    productos = []
+    vistos = set()
+
+    with sync_playwright() as pw:
+        browser, context, page = _abrir_contexto_coto(pw, headless=headless)
+        relanzado_visible = False
+        corrida_completa = False
+        motivo = "sin finalizar"
+
+        try:
+            pagina = 1
+            while True:
+                url = "https://www.cotodigital.com.ar/sitios/cdigi/productos/aceite-de-oliva"
+                if pagina > 1:
+                    url += f"?page={pagina}"
+
+                print(f"  [Coto] Pagina {pagina}...")
+                try:
+                    page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                    page.evaluate("window.scrollTo(0, 0)")
+                    time.sleep(1)
+                    _coto_alt_ant = 0
+                    _coto_sin_cambio = 0
+                    for _ in range(60):
+                        page.evaluate("window.scrollBy(0, 600)")
+                        time.sleep(0.4)
+                        _coto_alt_act = page.evaluate("document.body.scrollHeight")
+                        if _coto_alt_act == _coto_alt_ant:
+                            _coto_sin_cambio += 1
+                            if _coto_sin_cambio >= 4:
+                                break
+                        else:
+                            _coto_sin_cambio = 0
+                        _coto_alt_ant = _coto_alt_act
+                    page.evaluate("window.scrollTo(0, 0)")
+                    time.sleep(1.5)
+                    html = page.content()
+                    if _coto_bloqueado(page, html):
+                        if headless and not relanzado_visible:
+                            print("  [Coto] Bloqueo detectado en headless. Reintentando en visible...")
+                            context.close()
+                            browser.close()
+                            browser, context, page = _abrir_contexto_coto(pw, headless=False)
+                            relanzado_visible = True
+                            continue
+                        motivo = "bloqueo de seguridad"
+                        print("  [Coto] Bloqueo de seguridad detectado. Abortando scrape.")
+                        break
+                    n_items_coto = html.count("producto-card")
+                    if n_items_coto == 0 and headless and not relanzado_visible:
+                        print(f"  [Coto] Pag {pagina} vacia en headless. Reintentando en visible...")
+                        context.close()
+                        browser.close()
+                        browser, context, page = _abrir_contexto_coto(pw, headless=False)
+                        relanzado_visible = True
+                        continue
+                    print(f"  [Coto] Pag {pagina} cargada ({n_items_coto} cards en HTML)")
+                except Exception as e:
+                    if headless and not relanzado_visible:
+                        print(f"  [Coto] Headless fallo en pagina {pagina}: {e}")
+                        print("  [Coto] Reintentando en visible...")
+                        context.close()
+                        browser.close()
+                        browser, context, page = _abrir_contexto_coto(pw, headless=False)
+                        relanzado_visible = True
+                        continue
+                    motivo = f"error en pagina {pagina}: {e}"
+                    print(f"  [Coto] Error en pagina {pagina}: {e}")
+                    break
+
+                soup = BeautifulSoup(html, "html.parser")
+                cards = soup.select(".producto-card")
+
+                nuevos_pagina = 0
+                for card in cards:
+                    nombre_tag = card.select_one(".nombre-producto")
+                    if not nombre_tag:
+                        continue
+                    nombre = nombre_tag.get_text(strip=True)
+                    if not es_aceite_oliva(nombre):
+                        continue
+                    href_tag = card.select_one("a[href]")
+                    coto_id = href_tag["href"] if href_tag and href_tag.get("href") else nombre
+                    if coto_id in vistos:
+                        continue
+                    vistos.add(coto_id)
+
+                    precio_tag = card.select_one(".card-title")
+                    if not precio_tag:
+                        continue
+                    precio_real = _parsear_precio_coto(precio_tag.get_text(" ", strip=True))
+                    if precio_real is None:
+                        continue
+
+                    precio_sin = None
+                    en_oferta = False
+                    for small in card.select("small"):
+                        texto_small = small.get_text(" ", strip=True)
+                        if re.search(r"precio\s+regular", texto_small, re.IGNORECASE):
+                            v = _parsear_precio_coto(texto_small)
+                            if v and v > precio_real * 1.01:
+                                precio_sin = v
+                                en_oferta = True
+                            break
+
+                    ml = extraer_ml(nombre)
+                    productos.append({
+                        "supermercado":  "Coto",
+                        "nombre":        nombre,
+                        "ml":            ml,
+                        "precio":        round(precio_real, 2),
+                        "precio_sin_dto": round(precio_sin, 2) if precio_sin else None,
+                        "en_oferta":     en_oferta,
+                        "producto_id":   coto_id,
+                    })
+                    nuevos_pagina += 1
+
+                print(f"  [Coto] Pagina {pagina} -> {nuevos_pagina} productos nuevos")
+                if nuevos_pagina == 0:
+                    corrida_completa = True
+                    motivo = f"fin normal en pagina {pagina}"
+                    break
+                pagina += 1
+                time.sleep(1.5)
+        finally:
+            context.close()
+            browser.close()
+
+    return productos, corrida_completa, motivo
+
+
+def scrape_coto(headless: bool = False, max_attempts: int | None = None) -> list[dict]:
+    max_attempts = max_attempts or (5 if headless else 3)
+    umbral_minimo = _coto_umbral_minimo()
+    mejor_cantidad = 0
+    ultimo_motivo = "sin detalle"
+
+    for intento in range(1, max_attempts + 1):
+        if intento > 1:
+            print(f"  [Coto] Reintentando corrida completa ({intento}/{max_attempts})...")
+            time.sleep(min(4 * (intento - 1), 12))
+
+        headless_intento = headless if intento == 1 else False
+        productos, corrida_completa, motivo = _scrape_coto_once_retry(headless=headless_intento)
+        ultimo_motivo = motivo
+        mejor_cantidad = max(mejor_cantidad, len(productos))
+
+        corrida_suficiente = len(productos) >= umbral_minimo
+        if corrida_completa and corrida_suficiente:
+            if intento > 1:
+                print(f"  [Coto] Corrida valida en intento {intento} ({len(productos)} productos).")
+            return productos
+
+        fallas = []
+        if not corrida_completa:
+            fallas.append("corrida incompleta")
+        if not corrida_suficiente:
+            fallas.append(f"{len(productos)} productos (< umbral {umbral_minimo})")
+        detalle = ", ".join(fallas) if fallas else motivo
+        print(f"  [Coto] Intento {intento} descartado: {detalle}.")
+
+    raise RuntimeError(
+        f"Coto no pudo completarse tras {max_attempts} intentos. "
+        f"Mejor intento: {mejor_cantidad} productos. Ultimo motivo: {ultimo_motivo}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Scraper La Anónima (Playwright)
 # ---------------------------------------------------------------------------
