@@ -1124,8 +1124,17 @@ def _gramaje_familia_ac(gramos) -> str:
     return gramaje_grupo_label(grupo) if grupo else "Sin gramaje"
 
 
+def _variedad_familia_ac(variedad: str | None) -> str:
+    v = (variedad or "").strip()
+    if v == "Verde":
+        return "Verde con carozo"
+    if v == "Negra":
+        return "Negra con carozo"
+    return v or "Sin variedad"
+
+
 def sku_canonico_ac(marca: str, variedad: str, gramos, envase: str | None = None) -> str:
-    partes = [marca, variedad or "Sin variedad", _gramaje_familia_ac(gramos)]
+    partes = [marca, _variedad_familia_ac(variedad), _gramaje_familia_ac(gramos)]
     if envase and envase != "Sin detectar":
         partes.append(envase)
     return " · ".join(partes)
@@ -1165,7 +1174,7 @@ def sku_canonico_ac(marca: str, variedad: str, gramos, envase: str | None = None
 
 
 def sku_display_ac(variedad: str, gramos, envase: str | None = None) -> str:
-    partes = [variedad or "Sin variedad", _gramaje_familia_ac(gramos)]
+    partes = [_variedad_familia_ac(variedad), _gramaje_familia_ac(gramos)]
     if envase and envase != "Sin detectar":
         partes.append(envase)
     return " · ".join(partes)
