@@ -1705,6 +1705,41 @@ def _buscar_gramaje_unificado_catalogo_compat(
     )
 
 
+def _resolver_envase_catalogo_compat(
+    supermercado: str,
+    nombre: str,
+    marca: str,
+    variedad: str,
+    gramos,
+    envase_detectado: str,
+    gramos_original=None,
+):
+    try:
+        total_params = len(inspect.signature(resolver_envase_catalogo).parameters)
+    except (TypeError, ValueError):
+        total_params = 7
+
+    if total_params >= 7:
+        return resolver_envase_catalogo(
+            supermercado,
+            nombre,
+            marca,
+            variedad,
+            gramos,
+            envase_detectado,
+            gramos_original,
+        )
+
+    return resolver_envase_catalogo(
+        supermercado,
+        nombre,
+        marca,
+        variedad,
+        gramos,
+        envase_detectado,
+    )
+
+
 @st.cache_data(ttl=3600)
 def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
     if not DB_PATH.exists():
@@ -1742,7 +1777,7 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
         var_unif = unificar_variedad(var_raw)
         marca_cat = categorizar_marca_ac(marca)
         envase_base = detectar_envase_nombre(r["nombre"] or "")
-        envase = resolver_envase_catalogo(
+        envase = _resolver_envase_catalogo_compat(
             cadena,
             r["nombre"] or "",
             marca,
