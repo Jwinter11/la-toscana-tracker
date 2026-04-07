@@ -92,6 +92,42 @@ def _normalizar_envase(valor: str | None) -> str | None:
     return alias.get(key)
 
 
+def _canonizar_latoscana_familia(
+    marca: str,
+    variedad: str,
+    gramos,
+    envase: str | None = None,
+) -> tuple[int | None, str | None]:
+    if _slug(marca) not in {"la toscana", "toscana"}:
+        return _safe_int(gramos), _normalizar_envase(envase)
+
+    gramos_int = _safe_int(gramos)
+    envase_norm = _normalizar_envase(envase)
+    variedad_slug = _slug(variedad)
+
+    if variedad_slug == "verde rodajada":
+        return 300, "Doypack"
+
+    if variedad_slug in {"verde descarozada", "verde rellena morron", "verde rellena morrón"}:
+        if envase_norm == "Frasco" or (gramos_int is not None and gramos_int >= 320):
+            return 330, "Frasco"
+        return 300, "Doypack"
+
+    if variedad_slug in {"negra", "negra con carozo"}:
+        if envase_norm == "Frasco" or (gramos_int is not None and gramos_int >= 300):
+            return 330, "Frasco"
+        return 300, "Doypack"
+
+    if variedad_slug in {"verde", "verde con carozo"}:
+        if envase_norm == "Doypack":
+            return 300, "Doypack"
+        if gramos_int is not None and gramos_int < 250:
+            return 300, "Doypack"
+        return 330, "Frasco"
+
+    return gramos_int, envase_norm
+
+
 @lru_cache(maxsize=1)
 def _cargar_unificaciones_gramaje():
     by_pid: dict[str, int] = {}
@@ -172,29 +208,38 @@ def buscar_gramaje_unificado_catalogo(
     url: str | None = None,
 ) -> int | None:
     by_pid, by_url, by_name, by_producto, by_mvg = _cargar_unificaciones_gramaje()
+    gramos_resuelto: int | None = None
 
     pid = str(producto_id or "").strip()
     if pid and pid in by_pid:
-        return by_pid[pid]
+        gramos_resuelto = by_pid[pid]
 
-    url_slug = _slug(str(url or ""))
-    if url_slug and url_slug in by_url:
-        return by_url[url_slug]
+    if gramos_resuelto is None:
+        url_slug = _slug(str(url or ""))
+        if url_slug and url_slug in by_url:
+            gramos_resuelto = by_url[url_slug]
 
-    key_name = (_slug(supermercado), _slug(nombre))
-    if all(key_name) and key_name in by_name:
-        return by_name[key_name]
+    if gramos_resuelto is None:
+        key_name = (_slug(supermercado), _slug(nombre))
+        if all(key_name) and key_name in by_name:
+            gramos_resuelto = by_name[key_name]
 
-    producto = _slug(nombre)
-    if producto and producto in by_producto:
-        return by_producto[producto]
+    if gramos_resuelto is None:
+        producto = _slug(nombre)
+        if producto and producto in by_producto:
+            gramos_resuelto = by_producto[producto]
 
-    gramos_int = _safe_int(gramos)
-    key_mvg = (_slug(marca), _slug(variedad), gramos_int)
-    if all(key_mvg[:2]) and gramos_int is not None and key_mvg in by_mvg:
-        return by_mvg[key_mvg]
+    if gramos_resuelto is None:
+        gramos_int = _safe_int(gramos)
+        key_mvg = (_slug(marca), _slug(variedad), gramos_int)
+        if all(key_mvg[:2]) and gramos_int is not None and key_mvg in by_mvg:
+            gramos_resuelto = by_mvg[key_mvg]
 
-    return gramos_int
+    if gramos_resuelto is None:
+        gramos_resuelto = _safe_int(gramos)
+
+    gramos_resuelto, _ = _canonizar_latoscana_familia(marca, variedad, gramos_resuelto)
+    return gramos_resuelto
 
 
 def _resolver_envase_desde_conteo(conteo: dict[str, int]) -> str | None:
@@ -271,9 +316,27 @@ def resolver_envase_catalogo(
     variedad: str,
     gramos,
     envase_detectado: str,
+    gramos_original=None,
 ) -> str:
     envase_norm = _normalizar_envase(envase_detectado)
     envase_detectado = envase_norm or (envase_detectado if envase_detectado in ENVASES_VALIDOS else "Sin detectar")
+
+    marca_slug = _slug(marca)
+    variedad_slug = _slug(variedad)
+    nombre_slug = _slug(nombre)
+    gramos_int = _safe_int(gramos)
+    gramos_origen_int = _safe_int(gramos_original if gramos_original is not None else gramos)
+
+    if marca_slug in {"la toscana", "toscana"}:
+        _, envase_latoscana = _canonizar_latoscana_familia(
+            marca,
+            variedad,
+            gramos_origen_int,
+            None,
+        )
+        if envase_latoscana:
+            return envase_latoscana
+
     exactos, por_nombre, por_familia = _cargar_envases_catalogo()
     key_exacto = (_slug(supermercado), _slug(nombre))
     envase_catalogo = (
@@ -284,10 +347,9 @@ def resolver_envase_catalogo(
     if envase_catalogo:
         envase_detectado = envase_catalogo
 
-    marca_slug = _slug(marca)
-    variedad_slug = _slug(variedad)
-    nombre_slug = _slug(nombre)
-    gramos_int = _safe_int(gramos)
+    _, envase_latoscana = _canonizar_latoscana_familia(marca, variedad, gramos_int, envase_detectado)
+    if envase_latoscana:
+        envase_detectado = envase_latoscana
 
     # Correcciones manuales validadas sobre familias unificadas.
     # La Toscana verde con carozo 300g (Disco/Jumbo/Vea) corresponde a frasco.

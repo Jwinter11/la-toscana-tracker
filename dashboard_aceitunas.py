@@ -1742,7 +1742,15 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
         var_unif = unificar_variedad(var_raw)
         marca_cat = categorizar_marca_ac(marca)
         envase_base = detectar_envase_nombre(r["nombre"] or "")
-        envase = resolver_envase_catalogo(cadena, r["nombre"] or "", marca, var_raw, g, envase_base)
+        envase = resolver_envase_catalogo(
+            cadena,
+            r["nombre"] or "",
+            marca,
+            var_raw,
+            g,
+            envase_base,
+            r["gramos_sin_escurrir"],
+        )
         rows.append({
             "Fecha":              r["fecha"],
             "Cadena":             r["supermercado"],
