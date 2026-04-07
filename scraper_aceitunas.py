@@ -542,6 +542,7 @@ _MARCA_CORRECCIONES_AC = {
     "Malagueña":    "La Malagueña",
     "Malaguena":    "La Malagueña",
 }
+_MARCA_CORRECCIONES_AC_NORM = {_normalizar(k): v for k, v in _MARCA_CORRECCIONES_AC.items()}
 
 _PALABRAS_NO_MARCA_AC = {
     "Manzanilla", "Enteras", "Entera", "Descarozada", "Descarozadas",
@@ -555,30 +556,40 @@ _PALABRAS_NO_MARCA_AC = {
     "Espanolas", "Ver", "Verdes", "Verde", "Negr", "Negras", "Negra",
     "Aceitunas", "Aceituna", "Aceitunas.verdes", "Rodajadas",
 }
+_PALABRAS_NO_MARCA_AC_NORM = {_normalizar(p) for p in _PALABRAS_NO_MARCA_AC}
+_NO_MARCA_AC_NORM = {_normalizar(p) for p in _NO_MARCA_AC}
 
 
 def extraer_marca_aceituna(nombre: str) -> str:
-    n = nombre.lower()
+    n = _normalizar(nombre)
     for alias, canonical in _MARCAS_AC_SORTED:
-        if alias in n:
+        if _normalizar(alias) in n:
             return canonical
     for palabra in nombre.split():
         p = palabra.lower().strip(".,()-/&")
-        if len(p) > 2 and p not in _NO_MARCA_AC and not re.search(r"\d", p):
+        p_norm = _normalizar(p)
+        if len(p) > 2 and p_norm not in _NO_MARCA_AC_NORM and not re.search(r"\d", p):
             return palabra.strip(".,()-/&").capitalize()
     return "Otra"
 
 
-def limpiar_marca_aceituna(marca: str, cadena: str) -> str:
+def limpiar_marca_aceituna(marca: str, cadena: str, nombre: str = "") -> str:
     """Normaliza marcas antes de agrupar y guardar en la base."""
     marca = (marca or "").strip()
+    marca_norm = _normalizar(marca)
     if not marca:
-        return "Otra"
-    if marca in _MARCA_CORRECCIONES_AC:
-        return _MARCA_CORRECCIONES_AC[marca]
-    if marca in _PALABRAS_NO_MARCA_AC:
+        inferida = extraer_marca_aceituna(nombre) if nombre else ""
+        inferida_norm = _normalizar(inferida)
+        return _MARCA_CORRECCIONES_AC_NORM.get(inferida_norm, inferida) if inferida and inferida_norm not in _PALABRAS_NO_MARCA_AC_NORM else "Otra"
+    if marca_norm in _MARCA_CORRECCIONES_AC_NORM:
+        return _MARCA_CORRECCIONES_AC_NORM[marca_norm]
+    if marca_norm in _PALABRAS_NO_MARCA_AC_NORM:
+        inferida = extraer_marca_aceituna(nombre) if nombre else ""
+        inferida_norm = _normalizar(inferida)
+        if inferida and inferida_norm not in _PALABRAS_NO_MARCA_AC_NORM and inferida_norm != marca_norm:
+            return _MARCA_CORRECCIONES_AC_NORM.get(inferida_norm, inferida)
         return cadena
-    return marca
+    return _MARCA_CORRECCIONES_AC_NORM.get(marca_norm, marca)
 
 
 # ---------------------------------------------------------------------------
@@ -744,6 +755,90 @@ def guardar_en_sqlite_aceitunas(productos: list[dict], fecha: str) -> None:
     conn.close()
 
 
+def _conteos_recientes_cadena_aceitunas(cadena: str, limite: int = 7) -> list[int]:
+    try:
+        if not DB_PATH.exists():
+            return []
+
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        rows = cur.execute("""
+            SELECT COUNT(*) AS n
+            FROM aceitunas
+            WHERE supermercado = ? AND fecha < ?
+            GROUP BY fecha
+            HAVING n > 0
+            ORDER BY fecha DESC
+            LIMIT ?
+        """, (cadena, str(date.today()), limite)).fetchall()
+        conn.close()
+        return [int(r[0]) for r in rows if r and r[0]]
+    except Exception:
+        return []
+
+
+def _umbral_reintento_cadena_aceitunas(cadena: str) -> int:
+    counts = _conteos_recientes_cadena_aceitunas(cadena)
+    if not counts:
+        return 1
+    counts = sorted(counts)
+    mediana = counts[len(counts) // 2]
+    return max(3, int(mediana * 0.65))
+
+
+def _scrapear_cadena_con_recheck_aceitunas(
+    cadena: str,
+    scraper_fn,
+    max_attempts: int = 3,
+) -> list[dict]:
+    recientes = _conteos_recientes_cadena_aceitunas(cadena)
+    umbral = _umbral_reintento_cadena_aceitunas(cadena)
+    mejor: list[dict] = []
+    ultimo_error: Exception | None = None
+
+    for intento in range(1, max_attempts + 1):
+        if intento > 1:
+            print(f"  [{cadena}] Recheck automatico ({intento}/{max_attempts})...")
+            time.sleep(min(4 * (intento - 1), 12))
+
+        try:
+            prods = scraper_fn()
+        except Exception as exc:
+            ultimo_error = exc
+            print(f"  [{cadena}] Error en intento {intento}: {exc}")
+            continue
+
+        n = len(prods)
+        if n > len(mejor):
+            mejor = prods
+
+        ilogico = False
+        motivo = ""
+        if recientes:
+            if n < umbral:
+                ilogico = True
+                motivo = f"{n} aceitunas (< umbral {umbral}, hist reciente {recientes[:3]})"
+        elif n == 0:
+            ilogico = True
+            motivo = "0 resultados sin baseline previo"
+
+        if not ilogico:
+            return prods
+
+        print(f"  [{cadena}] Resultado ilogico detectado: {motivo}")
+
+    if ultimo_error and not mejor:
+        raise RuntimeError(
+            f"{cadena}: no se pudo validar la corrida tras {max_attempts} intentos "
+            f"por errores consecutivos ({ultimo_error})."
+        ) from ultimo_error
+
+    raise RuntimeError(
+        f"{cadena}: no se pudo validar la corrida tras {max_attempts} intentos. "
+        f"Mejor intento: {len(mejor)} aceitunas."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helpers para scrapers VTEX
 # ---------------------------------------------------------------------------
@@ -824,7 +919,7 @@ def _construir_producto_ac(
         "precio":              round(price, 2),
         "precio_sin_dto":      round(precio_sin, 2) if precio_sin else None,
         "en_oferta":           en_oferta,
-        "marca":               limpiar_marca_aceituna(marca_raw, supermercado),
+        "marca":               limpiar_marca_aceituna(marca_raw, supermercado, nombre),
         "producto_id":         prod_id,
         "url":                 url,
     }
@@ -1824,28 +1919,44 @@ def main():
 
     for nombre, base_url in VTEX_SUPERS.items():
         print(f"\n[{nombre}]")
-        prods = scrape_vtex_aceitunas(nombre, base_url)
+        prods = _scrapear_cadena_con_recheck_aceitunas(
+            cadena=nombre,
+            scraper_fn=lambda nombre=nombre, base_url=base_url: scrape_vtex_aceitunas(nombre, base_url),
+        )
         print(f"  Total {nombre}: {len(prods)} aceitunas")
         todos.extend(prods)
 
     for nombre, base_url in CENCOSUD_SUPERS.items():
         print(f"\n[{nombre}]")
-        prods = scrape_cencosud_aceitunas(nombre, base_url, headless=headless)
+        prods = _scrapear_cadena_con_recheck_aceitunas(
+            cadena=nombre,
+            scraper_fn=lambda nombre=nombre, base_url=base_url: scrape_cencosud_aceitunas(nombre, base_url, headless=headless),
+        )
         print(f"  Total {nombre}: {len(prods)} aceitunas")
         todos.extend(prods)
 
     print("\n[Chango Más]")
-    prods = scrape_changomas_aceitunas()
+    prods = _scrapear_cadena_con_recheck_aceitunas(
+        cadena="Chango Mas",
+        scraper_fn=scrape_changomas_aceitunas,
+    )
     print(f"  Total Chango Más: {len(prods)} aceitunas")
     todos.extend(prods)
 
     print("\n[Coto]")
-    prods = scrape_coto_aceitunas(headless=headless)
+    prods = _scrapear_cadena_con_recheck_aceitunas(
+        cadena="Coto",
+        scraper_fn=lambda: scrape_coto_aceitunas(headless=headless),
+        max_attempts=2,
+    )
     print(f"  Total Coto: {len(prods)} aceitunas")
     todos.extend(prods)
 
     print("\n[La Anónima]")
-    prods = scrape_anonima_aceitunas(headless=headless)
+    prods = _scrapear_cadena_con_recheck_aceitunas(
+        cadena="La Anonima",
+        scraper_fn=lambda: scrape_anonima_aceitunas(headless=headless),
+    )
     print(f"  Total La Anónima: {len(prods)} aceitunas")
     todos.extend(prods)
 

@@ -1424,6 +1424,93 @@ def guardar_historial(historial: dict) -> None:
         json.dump(historial, f, ensure_ascii=False, indent=2)
 
 
+def _conteos_recientes_cadena(tabla: str, cadena: str, limite: int = 7) -> list[int]:
+    try:
+        import sqlite3
+
+        if not DB_PATH.exists():
+            return []
+
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        rows = cur.execute(f"""
+            SELECT COUNT(*) AS n
+            FROM {tabla}
+            WHERE supermercado = ? AND fecha < ?
+            GROUP BY fecha
+            HAVING n > 0
+            ORDER BY fecha DESC
+            LIMIT ?
+        """, (cadena, str(date.today()), limite)).fetchall()
+        conn.close()
+        return [int(r[0]) for r in rows if r and r[0]]
+    except Exception:
+        return []
+
+
+def _umbral_reintento_cadena(tabla: str, cadena: str) -> int:
+    counts = _conteos_recientes_cadena(tabla, cadena)
+    if not counts:
+        return 1
+    counts = sorted(counts)
+    mediana = counts[len(counts) // 2]
+    return max(3, int(mediana * 0.65))
+
+
+def _scrapear_cadena_con_recheck(
+    cadena: str,
+    tabla: str,
+    etiqueta: str,
+    scraper_fn,
+    max_attempts: int = 3,
+) -> list[dict]:
+    recientes = _conteos_recientes_cadena(tabla, cadena)
+    umbral = _umbral_reintento_cadena(tabla, cadena)
+    mejor: list[dict] = []
+    ultimo_error: Exception | None = None
+
+    for intento in range(1, max_attempts + 1):
+        if intento > 1:
+            print(f"  [{cadena}] Recheck automatico ({intento}/{max_attempts})...")
+            time.sleep(min(4 * (intento - 1), 12))
+
+        try:
+            prods = scraper_fn()
+        except Exception as exc:
+            ultimo_error = exc
+            print(f"  [{cadena}] Error en intento {intento}: {exc}")
+            continue
+        n = len(prods)
+        if n > len(mejor):
+            mejor = prods
+
+        ilogico = False
+        motivo = ""
+        if recientes:
+            if n < umbral:
+                ilogico = True
+                motivo = f"{n} {etiqueta} (< umbral {umbral}, hist reciente {recientes[:3]})"
+        elif n == 0:
+            ilogico = True
+            motivo = "0 resultados sin baseline previo"
+
+        if not ilogico:
+            return prods
+
+        print(f"  [{cadena}] Resultado ilogico detectado: {motivo}")
+
+    if ultimo_error and not mejor:
+        raise RuntimeError(
+            f"{cadena}: no se pudo validar la corrida tras {max_attempts} intentos "
+            f"por errores consecutivos ({ultimo_error})."
+        ) from ultimo_error
+
+    raise RuntimeError(
+        f"{cadena}: no se pudo validar la corrida tras {max_attempts} intentos. "
+        f"Mejor intento: {len(mejor)} {etiqueta}."
+    )
+
+
 def agregar_corrida(historial: dict, productos: list[dict]) -> None:
     hoy = str(date.today())
     # Reemplazar si ya existe la fecha de hoy
@@ -1941,32 +2028,58 @@ def main():
     # VTEX estándar (Carrefour, Día)
     for nombre, base_url in VTEX_SUPERS.items():
         print(f"\n[{nombre}]")
-        prods = scrape_vtex(nombre, base_url)
+        prods = _scrapear_cadena_con_recheck(
+            cadena=nombre,
+            tabla="precios",
+            etiqueta="productos",
+            scraper_fn=lambda nombre=nombre, base_url=base_url: scrape_vtex(nombre, base_url),
+        )
         print(f"  Total {nombre}: {len(prods)} productos")
         todos_los_productos.extend(prods)
 
     # Cencosud con Playwright (Jumbo, Disco, Vea) — lee precio renderizado incluyendo Fin de Semana
     for nombre, base_url in CENCOSUD_SUPERS.items():
         print(f"\n[{nombre}]")
-        prods = scrape_cencosud_playwright(nombre, base_url, headless=headless)
+        prods = _scrapear_cadena_con_recheck(
+            cadena=nombre,
+            tabla="precios",
+            etiqueta="productos",
+            scraper_fn=lambda nombre=nombre, base_url=base_url: scrape_cencosud_playwright(nombre, base_url, headless=headless),
+        )
         print(f"  Total {nombre}: {len(prods)} productos")
         todos_los_productos.extend(prods)
 
     # Chango Más
     print("\n[Chango Más]")
-    prods = scrape_changomas()
+    prods = _scrapear_cadena_con_recheck(
+        cadena="Chango Mas",
+        tabla="precios",
+        etiqueta="productos",
+        scraper_fn=scrape_changomas,
+    )
     print(f"  Total Chango Más: {len(prods)} productos")
     todos_los_productos.extend(prods)
 
     # Coto
     print("\n[Coto]")
-    prods = scrape_coto(headless=headless)
+    prods = _scrapear_cadena_con_recheck(
+        cadena="Coto",
+        tabla="precios",
+        etiqueta="productos",
+        scraper_fn=lambda: scrape_coto(headless=headless),
+        max_attempts=2,
+    )
     print(f"  Total Coto: {len(prods)} productos")
     todos_los_productos.extend(prods)
 
     # La Anónima
     print("\n[La Anónima]")
-    prods = scrape_anonima(headless=headless)
+    prods = _scrapear_cadena_con_recheck(
+        cadena="La Anonima",
+        tabla="precios",
+        etiqueta="productos",
+        scraper_fn=lambda: scrape_anonima(headless=headless),
+    )
     print(f"  Total La Anónima: {len(prods)} productos")
     todos_los_productos.extend(prods)
 
