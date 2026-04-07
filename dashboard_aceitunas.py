@@ -1124,6 +1124,10 @@ def _gramaje_familia_ac(gramos) -> str:
     return gramaje_grupo_label(grupo) if grupo else "Sin gramaje"
 
 
+def _gramaje_codigo_ac(gramos) -> str:
+    return f"{int(gramos)}g" if gramos and not pd.isna(gramos) else "Sin gramaje"
+
+
 def _variedad_familia_ac(variedad: str | None) -> str:
     v = (variedad or "").strip()
     if v == "Verde":
@@ -1134,7 +1138,7 @@ def _variedad_familia_ac(variedad: str | None) -> str:
 
 
 def sku_canonico_ac(marca: str, variedad: str, gramos, envase: str | None = None) -> str:
-    partes = [marca, _variedad_familia_ac(variedad), _gramaje_familia_ac(gramos)]
+    partes = [marca, _variedad_familia_ac(variedad), _gramaje_codigo_ac(gramos)]
     if envase and envase != "Sin detectar":
         partes.append(envase)
     return " · ".join(partes)
@@ -1174,7 +1178,7 @@ def sku_canonico_ac(marca: str, variedad: str, gramos, envase: str | None = None
 
 
 def sku_display_ac(variedad: str, gramos, envase: str | None = None) -> str:
-    partes = [_variedad_familia_ac(variedad), _gramaje_familia_ac(gramos)]
+    partes = [_variedad_familia_ac(variedad), _gramaje_codigo_ac(gramos)]
     if envase and envase != "Sin detectar":
         partes.append(envase)
     return " · ".join(partes)
@@ -1203,18 +1207,17 @@ def completar_envase_por_familia(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     base["Gramos"] = base["Gramos"].astype(int)
-    base["_Gramaje_familia"] = base["Gramos"].apply(_gramaje_familia_ac)
     conteos = (
-        base.groupby(["Marca", "Variedad_raw", "_Gramaje_familia", "Envase"])
+        base.groupby(["Marca", "Variedad_raw", "Gramos", "Envase"])
         .size()
         .reset_index(name="n")
     )
 
-    mapa_familia: dict[tuple[str, str, str], str] = {}
-    for (marca, variedad, gramaje_familia), grp in conteos.groupby(["Marca", "Variedad_raw", "_Gramaje_familia"]):
+    mapa_familia: dict[tuple[str, str, int], str] = {}
+    for (marca, variedad, gramos), grp in conteos.groupby(["Marca", "Variedad_raw", "Gramos"]):
         grp = grp.sort_values(["n", "Envase"], ascending=[False, True]).reset_index(drop=True)
         if len(grp) == 1 or grp.loc[0, "n"] >= grp.loc[1, "n"] * 2:
-            mapa_familia[(marca, variedad, gramaje_familia)] = grp.loc[0, "Envase"]
+            mapa_familia[(marca, variedad, int(gramos))] = grp.loc[0, "Envase"]
 
     if not mapa_familia:
         return df
@@ -1232,7 +1235,7 @@ def completar_envase_por_familia(df: pd.DataFrame) -> pd.DataFrame:
         key = (
             df.at[idx, "Marca"],
             df.at[idx, "Variedad_raw"],
-            _gramaje_familia_ac(df.at[idx, "Gramos"]),
+            int(df.at[idx, "Gramos"]),
         )
         envase = mapa_familia.get(key)
         if envase:
