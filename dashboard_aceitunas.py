@@ -1695,6 +1695,7 @@ def cargar_datos_aceitunas(_mtime=None) -> pd.DataFrame:
             marca,
             var_raw,
             r["gramos_sin_escurrir"],
+            r["url"] or "",
         )
         precio  = r["precio"]
         gondola = r["precio_sin_dto"] or precio

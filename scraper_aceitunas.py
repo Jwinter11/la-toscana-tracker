@@ -468,6 +468,7 @@ def aplicar_catalogo_gramajes(productos: list[dict]) -> list[dict]:
             p.get("marca", ""),
             p.get("variedad", ""),
             g_actual,
+            p.get("url", ""),
         )
         if not g_unificado or g_unificado == g_actual:
             ajustados.append(p)

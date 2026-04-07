@@ -9,6 +9,7 @@ import pandas as pd
 
 DIRECTORIO = Path(__file__).parent
 ARCHIVO_UNIFICACIONES = DIRECTORIO / "unificaciones_gramaje.xlsx"
+ARCHIVO_VERIFICACION_GRAMAJES = DIRECTORIO / "verificacion_gramajes.xlsx"
 ARCHIVO_ENVASE = DIRECTORIO / "envase_aceitunas.xlsx"
 ARCHIVO_REVISION_ENVASE = DIRECTORIO / "revision_envase.xlsx"
 
@@ -94,36 +95,71 @@ def _normalizar_envase(valor: str | None) -> str | None:
 @lru_cache(maxsize=1)
 def _cargar_unificaciones_gramaje():
     by_pid: dict[str, int] = {}
+    by_url: dict[str, int] = {}
     by_name: dict[tuple[str, str], int] = {}
     by_producto: dict[str, int] = {}
     by_mvg: dict[tuple[str, str, int], int] = {}
 
-    if not ARCHIVO_UNIFICACIONES.exists():
-        return by_pid, by_name, by_producto, by_mvg
+    def registrar(
+        unified,
+        original,
+        supermercado,
+        nombre,
+        marca="",
+        variedad="",
+        producto_id="",
+        url="",
+    ) -> None:
+        unified_int = _safe_int(unified)
+        original_int = _safe_int(original)
+        if unified_int is None:
+            return
 
-    df = pd.read_excel(ARCHIVO_UNIFICACIONES, sheet_name="Unificaciones")
-    for _, row in df.iterrows():
-        unified = _safe_int(row.get("Gramaje Unificado (g)"))
-        original = _safe_int(row.get("Gramaje Original (g)"))
-        if unified is None:
-            continue
-
-        pid = str(row.get("producto_id") or "").strip()
-        cadena = _slug(str(row.get("Supermercado") or ""))
-        nombre = _slug(str(row.get("Nombre") or ""))
-        marca = _slug(str(row.get("Marca") or ""))
-        variedad = _slug(str(row.get("Variedad") or ""))
+        pid = str(producto_id or "").strip()
+        cadena = _slug(str(supermercado or ""))
+        nombre_slug = _slug(str(nombre or ""))
+        marca_slug = _slug(str(marca or ""))
+        variedad_slug = _slug(str(variedad or ""))
+        url_slug = _slug(str(url or ""))
 
         if pid:
-            by_pid[pid] = unified
-        if cadena and nombre:
-            by_name[(cadena, nombre)] = unified
-        if nombre:
-            by_producto[nombre] = unified
-        if marca and variedad and original is not None:
-            by_mvg[(marca, variedad, original)] = unified
+            by_pid[pid] = unified_int
+        if url_slug:
+            by_url[url_slug] = unified_int
+        if cadena and nombre_slug:
+            by_name[(cadena, nombre_slug)] = unified_int
+        if nombre_slug:
+            by_producto[nombre_slug] = unified_int
+        if marca_slug and variedad_slug and original_int is not None:
+            by_mvg[(marca_slug, variedad_slug, original_int)] = unified_int
 
-    return by_pid, by_name, by_producto, by_mvg
+    if ARCHIVO_UNIFICACIONES.exists():
+        df = pd.read_excel(ARCHIVO_UNIFICACIONES, sheet_name="Unificaciones")
+        for _, row in df.iterrows():
+            registrar(
+                unified=row.get("Gramaje Unificado (g)"),
+                original=row.get("Gramaje Original (g)"),
+                supermercado=row.get("Supermercado"),
+                nombre=row.get("Nombre"),
+                marca=row.get("Marca"),
+                variedad=row.get("Variedad"),
+                producto_id=row.get("producto_id"),
+                url=row.get("URL"),
+            )
+
+    if ARCHIVO_VERIFICACION_GRAMAJES.exists():
+        df = pd.read_excel(ARCHIVO_VERIFICACION_GRAMAJES)
+        for _, row in df.iterrows():
+            registrar(
+                unified=row.get("Gramaje Correcto (g)"),
+                original=row.get("Gramaje Actual (g)"),
+                supermercado=row.get("Supermercado"),
+                nombre=row.get("Nombre"),
+                producto_id=row.get("producto_id"),
+                url=row.get("URL"),
+            )
+
+    return by_pid, by_url, by_name, by_producto, by_mvg
 
 
 def buscar_gramaje_unificado_catalogo(
@@ -133,12 +169,17 @@ def buscar_gramaje_unificado_catalogo(
     marca: str,
     variedad: str,
     gramos,
+    url: str | None = None,
 ) -> int | None:
-    by_pid, by_name, by_producto, by_mvg = _cargar_unificaciones_gramaje()
+    by_pid, by_url, by_name, by_producto, by_mvg = _cargar_unificaciones_gramaje()
 
     pid = str(producto_id or "").strip()
     if pid and pid in by_pid:
         return by_pid[pid]
+
+    url_slug = _slug(str(url or ""))
+    if url_slug and url_slug in by_url:
+        return by_url[url_slug]
 
     key_name = (_slug(supermercado), _slug(nombre))
     if all(key_name) and key_name in by_name:
