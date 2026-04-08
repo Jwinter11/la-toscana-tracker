@@ -169,6 +169,117 @@ def formatear_pesos(valor) -> str:
     return f"${valor:,.0f}".replace(",", ".")
 
 
+def _float_or_zero(valor) -> float:
+    try:
+        return float(valor or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _nombres_clusters_vtex(raw_clusters) -> list[str]:
+    if isinstance(raw_clusters, dict):
+        return [str(v).strip() for v in raw_clusters.values() if str(v).strip()]
+    if isinstance(raw_clusters, list):
+        nombres = []
+        for cluster in raw_clusters:
+            if isinstance(cluster, dict):
+                nombre = (
+                    cluster.get("name")
+                    or cluster.get("Name")
+                    or cluster.get("label")
+                    or cluster.get("Label")
+                    or ""
+                )
+            else:
+                nombre = str(cluster)
+            nombre = str(nombre).strip()
+            if nombre:
+                nombres.append(nombre)
+        return nombres
+    return []
+
+
+def _teasers_vtex(item: dict, offer: dict) -> list[str]:
+    textos = []
+    for key in (
+        "teasers",
+        "Teasers",
+        "promotionTeasers",
+        "PromotionTeasers",
+        "promotions",
+        "Promotions",
+    ):
+        values = offer.get(key)
+        if values is None:
+            values = item.get(key)
+        if not isinstance(values, list):
+            continue
+        for entry in values:
+            if isinstance(entry, dict):
+                nombre = (
+                    entry.get("name")
+                    or entry.get("Name")
+                    or entry.get("title")
+                    or entry.get("Title")
+                    or entry.get("text")
+                    or entry.get("Text")
+                    or ""
+                )
+            else:
+                nombre = str(entry)
+            nombre = str(nombre).strip()
+            if nombre:
+                textos.append(nombre)
+    return textos
+
+
+def _parece_promocion_vtex(item: dict, offer: dict) -> bool:
+    patrones_descuento = (
+        r"\b\d{1,2}%\b",
+        r"\boff\b",
+        r"\bdto\b",
+        r"\bdescuento\b",
+        r"\bpromo\b",
+    )
+    textos = _nombres_clusters_vtex(item.get("productClusters", [])) + _teasers_vtex(item, offer)
+    for texto in textos:
+        t = texto.lower()
+        if re.search(r"multi|segunda|2da|2x|3x", t):
+            continue
+        if any(re.search(patron, t) for patron in patrones_descuento):
+            return True
+    return False
+
+
+def _resolver_precios_vtex(item: dict, offer: dict) -> tuple[float, float | None, bool]:
+    price = _float_or_zero(offer.get("Price", 0))
+    list_price = _float_or_zero(offer.get("ListPrice", 0))
+    price_without_discount = _float_or_zero(
+        offer.get("PriceWithoutDiscount", 0) or offer.get("priceWithoutDiscount", 0)
+    )
+    spot_price = _float_or_zero(offer.get("spotPrice", 0))
+
+    if spot_price > 0 and spot_price < price * 0.99 and precio_valido(spot_price):
+        return round(spot_price, 2), round(price, 2), True
+
+    base_candidates = [
+        valor
+        for valor in (price_without_discount, list_price)
+        if valor > price * 1.01 and precio_valido(valor)
+    ]
+    if not base_candidates:
+        return round(price, 2), None, False
+
+    precio_base = max(base_candidates)
+    ratio = precio_base / price if price > 0 else 0
+    promo_detectada = _parece_promocion_vtex(item, offer)
+
+    if ratio <= 1.35 or (promo_detectada and ratio <= 2.25):
+        return round(price, 2), round(precio_base, 2), True
+
+    return round(price, 2), None, False
+
+
 # ---------------------------------------------------------------------------
 # Scrapers VTEX
 # ---------------------------------------------------------------------------
@@ -235,25 +346,11 @@ def scrape_vtex(supermercado: str, base_url: str) -> list[dict]:
                     continue
                 offer = sellers[0].get("commertialOffer", {})
 
-                price      = float(offer.get("Price", 0) or 0)
-                list_price = float(offer.get("ListPrice", 0) or 0)
-                spot_price = float(offer.get("spotPrice", 0) or 0)
+                price, precio_sin, en_oferta = _resolver_precios_vtex(item, offer)
                 disponible = int(offer.get("AvailableQuantity", 0) or 0)
 
                 if price <= 0 or not precio_valido(price) or disponible <= 0:
                     continue
-
-                # spotPrice < Price → el precio real es spotPrice y el regular es Price
-                if spot_price > 0 and spot_price < price * 0.99 and precio_valido(spot_price):
-                    en_oferta  = True
-                    precio_sin = round(price, 2)
-                    price      = spot_price
-                else:
-                    # ListPrice > 1.35x del precio actual = MSRP inflado (no aparece en el site)
-                    en_oferta  = (list_price > price * 1.01
-                                  and list_price <= price * 1.35
-                                  and precio_valido(list_price))
-                    precio_sin = list_price if en_oferta else None
 
                 measure_unit = sku.get("measurementUnit", "")
                 unit_mult    = float(sku.get("unitMultiplier", 0) or 0)
