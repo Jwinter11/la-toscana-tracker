@@ -271,13 +271,7 @@ def _resolver_precios_vtex(item: dict, offer: dict) -> tuple[float, float | None
         return round(price, 2), None, False
 
     precio_base = max(base_candidates)
-    ratio = precio_base / price if price > 0 else 0
-    promo_detectada = _parece_promocion_vtex(item, offer)
-
-    if ratio <= 1.35 or (promo_detectada and ratio <= 2.25):
-        return round(price, 2), round(precio_base, 2), True
-
-    return round(price, 2), None, False
+    return round(price, 2), round(precio_base, 2), True
 
 
 # ---------------------------------------------------------------------------
