@@ -1330,6 +1330,10 @@ def scrape_anonima(headless: bool = False, _retry_count: int = 0) -> list[dict]:
                 wait_until="domcontentloaded",
             )
             time.sleep(3)
+            try:
+                page.wait_for_selector(".producto-item", timeout=15000)
+            except Exception:
+                time.sleep(6)
             # Scroll hasta que la altura no cambie (lazy-load completo)
             _altura_ant = 0
             _intentos_sin_cambio = 0
@@ -1348,16 +1352,15 @@ def scrape_anonima(headless: bool = False, _retry_count: int = 0) -> list[dict]:
             page.evaluate("window.scrollTo(0, 0)")
             time.sleep(1.5)
             html = page.content()
+            if "producto-item" not in html:
+                time.sleep(6)
+                html = page.content()
             n_items_visible = html.count("producto-item")
             print(f"  [La Anonima] Página cargada ({n_items_visible} items en HTML)")
         except Exception as e:
             print(f"  [La Anonima] Error buscando productos: {e}")
             browser.close()
-            if _retry_count < 2:
-                print(f"  [La Anonima] Reintentando scrape ({_retry_count + 1}/2)...")
-                time.sleep(3)
-                return scrape_anonima(headless=headless, _retry_count=_retry_count + 1)
-            return []
+            raise
 
         soup = BeautifulSoup(html, "html.parser")
         items = soup.select(".producto-item")
@@ -1438,7 +1441,7 @@ def scrape_anonima(headless: bool = False, _retry_count: int = 0) -> list[dict]:
                 "producto_id":   anon_id,
             })
 
-        if not productos and _retry_count < 2:
+        if False and not productos and _retry_count < 2:
             print(f"  [La Anonima] Respuesta vacía. Reintentando scrape ({_retry_count + 1}/2)...")
             browser.close()
             time.sleep(3)
