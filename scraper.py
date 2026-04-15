@@ -496,6 +496,48 @@ def _parsear_precio_disco(texto: str) -> float | None:
 
 
 # JS que corre dentro de la página Playwright para extraer productos con precios
+def _leer_precio_publico_pdp_cencosud(page, product_url: str) -> tuple[float | None, float | None]:
+    """
+    Lee el precio visible en la PDP publica de Cencosud.
+    Se usa para descartar ofertas fantasma cuando la grilla muestra un
+    descuento que la pagina de detalle no confirma.
+    """
+    try:
+        page.goto(product_url, timeout=30_000, wait_until="domcontentloaded")
+        page.wait_for_timeout(4_000)
+        texto = page.inner_text("body")
+    except Exception:
+        return None, None
+
+    anchor = texto.find("SKU:")
+    if anchor >= 0:
+        texto = texto[anchor : anchor + 1_200]
+    else:
+        texto = texto[:1_200]
+
+    precios: list[float] = []
+    for linea in texto.splitlines():
+        t = linea.strip()
+        if not t or not t.startswith("$"):
+            continue
+        if re.search(r"lt\.|litro|impuesto", t, re.IGNORECASE):
+            continue
+        valor = _parsear_precio_disco(t)
+        if valor and (not precios or abs(valor - precios[-1]) > 0.01):
+            precios.append(valor)
+        if len(precios) >= 2:
+            break
+
+    if not precios:
+        return None, None
+
+    precio_actual = precios[0]
+    precio_original = None
+    if len(precios) > 1 and precios[1] > precio_actual * 1.01:
+        precio_original = precios[1]
+    return precio_actual, precio_original
+
+
 _JS_EXTRAER_CENCOSUD = r"""() => {
     // Contenedor: galleryItem (cada tarjeta de producto en la grilla VTEX)
     const cards = document.querySelectorAll('[class*="galleryItem"]');
@@ -774,6 +816,7 @@ def scrape_cencosud_playwright(
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
         page = browser.new_page()
+        page_publica = None
         try:
             # ── Primar cookies VTEX ──────────────────────────────────────────
             # El cookie vtex_segment controla tabla de precios y promociones.
@@ -825,11 +868,11 @@ def scrape_cencosud_playwright(
         except Exception as e:
             print(f"  [{supermercado}] Error Playwright: {e}")
         finally:
+            if page_publica is not None:
+                page_publica.close()
             browser.close()
 
-        items = items_total
-
-    for item in items:
+    for item in items_total:
         nombre = (item.get("name") or "").strip()
         if not nombre or not es_aceite_oliva(nombre):
             continue
@@ -849,6 +892,37 @@ def scrape_cencosud_playwright(
             and precio_orig > precio * 1.01
             and precio_valido(precio_orig)
         )
+
+        if supermercado == "Vea" and en_oferta and item.get("productHref"):
+            product_href = item.get("productHref") or ""
+            product_url = f"{base_url}{product_href}" if product_href.startswith("/") else product_href
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as pw_publico:
+                    browser_publico = pw_publico.chromium.launch(headless=True)
+                    page_publica = browser_publico.new_page()
+                    try:
+                        pdp_precio, pdp_precio_orig = _leer_precio_publico_pdp_cencosud(
+                            page_publica,
+                            product_url,
+                        )
+                    finally:
+                        browser_publico.close()
+            except Exception:
+                pdp_precio, pdp_precio_orig = None, None
+
+            if (
+                pdp_precio
+                and pdp_precio > precio * 1.05
+                and (not pdp_precio_orig or pdp_precio_orig <= pdp_precio * 1.01)
+            ):
+                print(
+                    f"  [{supermercado}] Oferta descartada por PDP: "
+                    f"{nombre[:70]} -> {formatear_pesos(pdp_precio)}"
+                )
+                precio = pdp_precio
+                precio_orig = None
+                en_oferta = False
 
         ml = extraer_ml(nombre)
         productos.append({

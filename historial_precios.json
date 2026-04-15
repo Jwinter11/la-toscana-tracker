@@ -100282,12 +100282,12 @@
           "supermercado": "Vea",
           "nombre": "Aceite De Oliva Extra Virgen Mediterraneo Oliovita 500 Ml",
           "ml": 500,
-          "precio": 12390.0,
-          "precio_sin_dto": 20650.0,
-          "en_oferta": true,
+          "precio": 18000.0,
+          "precio_sin_dto": null,
+          "en_oferta": false,
           "producto_id": "/aceite-de-oliva-extra-virgen-mediterraneo-oliovita-500-ml/p",
           "marca": "Oliovita",
-          "precio_litro": 24780
+          "precio_litro": 36000
         },
         {
           "supermercado": "Vea",
