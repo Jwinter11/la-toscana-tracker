@@ -104,7 +104,7 @@ def bucket_gramaje(ml) -> str | None:
 
 def categoria_aceite(nombre: str) -> str:
     n = _norm_sku(nombre or "")
-    if re.search(r"con\s+aji|aji\s+picante|con\s+albahaca|con\s+limon|con\s+ajo\b", n):
+    if re.search(r"(?:con|c/)\s*aji|aji\s+picante|(?:con|c/)\s*albah(?:aca)?|(?:con|c/)\s*limon|(?:con|c/)\s*ajo\b", n):
         return "Saborizados"
     if re.search(r"cosecha\s+tardia|cosecha\s+temprana", n):
         return "Cosechas especiales"
@@ -170,6 +170,16 @@ def canonicalizar_sku(marca_raw: str, nombre: str, ml) -> str:
         if re.search(r"\bc\s+zuelo\b", n):   variante = "Clásico"
         elif re.search(r"\bs\s+zuelo\b", n): variante = "Suave"
         elif re.search(r"\bi\s+zuelo\b", n): variante = "Intenso"
+
+    if variante is None:
+        if re.search(r"(?:con|c/)\s*ajo\b", n):
+            variante = "Con Ajo"
+        elif re.search(r"(?:con|c/)\s*albah(?:aca)?", n):
+            variante = "Con Albahaca"
+        elif re.search(r"(?:con|c/)\s*limon", n):
+            variante = "Con LimÃ³n"
+        elif re.search(r"(?:con|c/)\s*aji|aji\s+picante", n):
+            variante = "Con AjÃ­"
 
     if variante is None:
         for pat, lbl in _VARIANTE_PATS:
@@ -2534,6 +2544,17 @@ if _page_sel == "🎯  Mi Marca":
             if _mm_sku_sel != "Todos los SKUs":
                 _mm_heat_src = _mm_heat_src[_mm_heat_src["SKU_canonico"] == _mm_sku_sel]
             _mm_heat_src = _mm_heat_src.copy()
+            _mm_heat_seen_sem: dict = {}
+            for _f in sorted(_mm_heat_src["Fecha"].unique()):
+                _k = _periodo_semanal_label(pd.Timestamp(_f))
+                if _k not in _mm_heat_seen_sem:
+                    _mm_heat_seen_sem[_k] = []
+                _mm_heat_seen_sem[_k].append(_f)
+            _mm_heat_lbl = st.session_state.get("mm_pres_ventana")
+            if _mm_heat_seen_sem:
+                if _mm_heat_lbl not in _mm_heat_seen_sem:
+                    _mm_heat_lbl = list(_mm_heat_seen_sem.keys())[-1]
+                _mm_heat_src = _mm_heat_src[_mm_heat_src["Fecha"].isin(_mm_heat_seen_sem[_mm_heat_lbl])]
             _mm_heat_src = (_mm_heat_src.sort_values(["Fecha", "Cadena", "SKU_canonico"])
                             .groupby(["SKU_canonico", "Cadena"], as_index=False)
                             .tail(1))
@@ -2547,7 +2568,7 @@ if _page_sel == "🎯  Mi Marca":
                 _z_thresh = (max(_z_flat) * 0.55) if _z_flat else 0
                 _mm_fecha_ref = _mm_heat_src["Fecha"].max()
                 st.markdown(
-                    f'<div class="chart-note">Precio actual por cadena segun la ultima observacion disponible del periodo seleccionado ({_mm_fecha_ref:%d/%m/%Y}).</div>',
+                    f'<div class="chart-note">Precio actual por cadena segun la ultima observacion disponible de <b>{_mm_heat_lbl}</b> ({_mm_fecha_ref:%d/%m/%Y}).</div>',
                     unsafe_allow_html=True,
                 )
                 fig_mm_h = go.Figure(go.Heatmap(
