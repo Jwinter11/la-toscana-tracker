@@ -2530,7 +2530,7 @@ if _page_sel == "🎯  Mi Marca":
 
         # ── B) Presencia por cadena — heatmap SKU × cadena ───────────────
         with st.expander("🏪 Presencia por cadena", expanded=True):
-            _mm_heat_src = df_full[df_full["Marca_raw"] == _mm_sel]
+            _mm_heat_src = _mm_dff_base.copy()
             if _mm_sku_sel != "Todos los SKUs":
                 _mm_heat_src = _mm_heat_src[_mm_heat_src["SKU_canonico"] == _mm_sku_sel]
             _mm_heat_src = _mm_heat_src.copy()
