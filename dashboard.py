@@ -46,6 +46,22 @@ def _periodo_semanal_label(fecha) -> str:
         rango = f"{inicio.day:02d} {mes_ini}-{fin.day:02d} {mes_fin}"
     return f"Sem {int(iso.week)} · {rango}"
 
+def _periodo_mensual_label(fecha) -> str:
+    ts = pd.Timestamp(fecha).normalize()
+    return f"{_MESES_CORTOS_ES[ts.month - 1]} {ts.year}"
+
+
+def _mapa_periodos_por_granularidad(fechas, granularidad: str) -> dict[str, list]:
+    periodos: dict[str, list] = {}
+    for fecha in sorted(pd.Series(fechas).dropna().unique().tolist()):
+        ts = pd.Timestamp(fecha)
+        clave = _periodo_mensual_label(ts) if granularidad == "Mensual" else _periodo_semanal_label(ts)
+        if clave not in periodos:
+            periodos[clave] = []
+        periodos[clave].append(fecha)
+    return periodos
+
+
 _PALABRAS_EXCLUIR_PRODUCTO = [
     "mayonesa", "hummus", "vinagre", "aderezo", "salsa", "pesto",
     "aceituna", "girasol", "maiz", "maíz", "soja", "canola", "spray",
@@ -1386,14 +1402,42 @@ if _page_sel == "📊  Resumen":
 # TAB 2 · POR CADENA
 # ══════════════════════════════════════════════════════════════════════════
 if _page_sel == "🏪  Por Cadena":
-    _fc2a, _fc2b, _ = st.columns([2, 2, 3])
+    _src_tab2 = df_full[
+        df_full["Cadena"].isin(cadenas_sel) &
+        df_full["Marca"].isin(cats_sel)
+    ].copy()
+    _fc2a, _fc2b, _fc2c, _fc2d, _ = st.columns([1.4, 1.5, 2.3, 1.8, 2.0])
     with _fc2a:
-        dff2, _ = gram_filter("gram_tab2")
+        _src_tab2, _ = gram_filter("gram_tab2", source=_src_tab2)
     with _fc2b:
+        _tab2_gran = st.selectbox("Vista", ["Semanal", "Mensual"], key="gran_tab2")
+    _tab2_period_map = _mapa_periodos_por_granularidad(_src_tab2["Fecha"], _tab2_gran)
+    _tab2_period_labels = list(_tab2_period_map.keys())
+    with _fc2c:
+        _tab2_period_sel = st.selectbox(
+            "Periodo",
+            _tab2_period_labels,
+            index=len(_tab2_period_labels) - 1 if _tab2_period_labels else 0,
+            key=f"periodo_tab2_{'mes' if _tab2_gran == 'Mensual' else 'sem'}",
+        )
+    dff2 = _src_tab2[_src_tab2["Fecha"].isin(_tab2_period_map.get(_tab2_period_sel, []))].copy()
+    with _fc2d:
         _cadenas2_opts = ["Todas las cadenas"] + sorted(dff2["Cadena"].unique().tolist())
         _cadena2_sel = st.selectbox("🏪 Cadena", _cadenas2_opts, key="cadena_tab2")
     if _cadena2_sel != "Todas las cadenas":
         dff2 = dff2[dff2["Cadena"] == _cadena2_sel].copy()
+
+    if _tab2_period_sel:
+        st.markdown(
+            f'<div class="chart-note">Vista de la pestana: <b>{_tab2_gran}</b> - '
+            f'periodo seleccionado <b>{_tab2_period_sel}</b>. '
+            f'Todos los graficos de esta seccion usan esa misma ventana temporal.</div>',
+            unsafe_allow_html=True,
+        )
+
+    if dff2.empty:
+        st.info("Sin datos para la cadena y el periodo seleccionados.")
+        st.stop()
 
     with st.expander("Precio promedio & Productos por cadena", expanded=True):
         col_l, col_r = st.columns([3, 2], gap="large")
