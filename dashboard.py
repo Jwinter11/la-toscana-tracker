@@ -193,9 +193,9 @@ def canonicalizar_sku(marca_raw: str, nombre: str, ml) -> str:
         elif re.search(r"(?:con|c/)\s*albah(?:aca)?", n):
             variante = "Con Albahaca"
         elif re.search(r"(?:con|c/)\s*limon", n):
-            variante = "Con LimÃ³n"
+            variante = "Con Limón"
         elif re.search(r"(?:con|c/)\s*aji|aji\s+picante", n):
-            variante = "Con AjÃ­"
+            variante = "Con Ají"
 
     if variante is None:
         for pat, lbl in _VARIANTE_PATS:
