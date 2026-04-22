@@ -1438,7 +1438,44 @@ def scrape_anonima(headless: bool = False, _retry_count: int = 0) -> list[dict]:
 
         soup = BeautifulSoup(html, "html.parser")
         items = soup.select(".producto-item")
-        print(f"  [La Anonima] .producto-item encontrados: {len(items)}")
+        extra_searches = [
+            ("aceite", "https://www.laanonima.com.ar/buscar/aceite"),
+            ("oliva", "https://www.laanonima.com.ar/buscar/oliva"),
+            ("la toscana", "https://www.laanonima.com.ar/buscar/la%20toscana"),
+            ("oliovita", "https://www.laanonima.com.ar/buscar/oliovita"),
+            ("natura oliva", "https://www.laanonima.com.ar/buscar/natura%20oliva"),
+        ]
+        for search_label, search_url in extra_searches:
+            try:
+                page.goto(search_url, timeout=30000, wait_until="domcontentloaded")
+                time.sleep(3)
+                try:
+                    page.wait_for_selector(".producto-item", timeout=12000)
+                except Exception:
+                    time.sleep(4)
+                _altura_ant = 0
+                _intentos_sin_cambio = 0
+                for _ in range(60):
+                    page.evaluate("window.scrollBy(0, 600)")
+                    time.sleep(0.4)
+                    _altura_act = page.evaluate("document.body.scrollHeight")
+                    if _altura_act == _altura_ant:
+                        _intentos_sin_cambio += 1
+                        if _intentos_sin_cambio >= 4:
+                            break
+                    else:
+                        _intentos_sin_cambio = 0
+                    _altura_ant = _altura_act
+                page.evaluate("window.scrollTo(0, 0)")
+                time.sleep(1.5)
+                html_extra = page.content()
+                soup_extra = BeautifulSoup(html_extra, "html.parser")
+                items_extra = soup_extra.select(".producto-item")
+                items.extend(items_extra)
+                print(f"  [La Anonima] '{search_label}' -> {len(items_extra)} items extra")
+            except Exception as e:
+                print(f"  [La Anonima] Error en busqueda extra '{search_label}': {e}")
+        print(f"  [La Anonima] .producto-item acumulados: {len(items)}")
 
         vistos_an = set()
         for item in items:
@@ -1622,6 +1659,10 @@ def _umbral_reintento_cadena(tabla: str, cadena: str) -> int:
         return 1
     counts = sorted(counts)
     mediana = counts[len(counts) // 2]
+    if cadena == "La Anonima":
+        # La Anonima cambio el buscador y hoy expone menos surtido por sucursal.
+        # Mantenemos guardrail contra respuestas vacias, sin exigir el historico completo.
+        return max(10, int(mediana * 0.30))
     return max(3, int(mediana * 0.65))
 
 
