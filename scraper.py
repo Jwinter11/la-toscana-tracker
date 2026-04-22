@@ -1399,7 +1399,7 @@ def scrape_anonima(headless: bool = False, _retry_count: int = 0) -> list[dict]:
         print("  [La Anonima] Buscando aceite de oliva...")
         try:
             page.goto(
-                "https://www.laanonima.com.ar/buscar/aceite%20de%20oliva",
+                "https://www.laanonima.com.ar/buscar/aceite%20oliva",
                 timeout=30000,
                 wait_until="domcontentloaded",
             )

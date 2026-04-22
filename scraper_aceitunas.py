@@ -1568,7 +1568,7 @@ def scrape_anonima_aceitunas(headless: bool = False) -> list[dict]:
         # Buscar aceitunas
         print("  [La Anonima] Buscando aceitunas...")
         try:
-            page.goto("https://www.laanonima.com.ar/buscar/aceitunas",
+            page.goto("https://www.laanonima.com.ar/buscar/aceituna",
                       timeout=30000, wait_until="domcontentloaded")
             time.sleep(3)
             alt_ant, sin_cambio = 0, 0
