@@ -1568,11 +1568,11 @@ def scrape_anonima(headless: bool = False, _retry_count: int = 0) -> list[dict]:
                 "producto_id":   anon_id,
             })
 
-        if False and not productos and _retry_count < 2:
+        if not productos and headless and _retry_count < 1:
             print(f"  [La Anonima] Respuesta vacía. Reintentando scrape ({_retry_count + 1}/2)...")
             browser.close()
             time.sleep(3)
-            return scrape_anonima(headless=headless, _retry_count=_retry_count + 1)
+            return scrape_anonima(headless=False, _retry_count=_retry_count + 1)
 
         print(f"  [La Anonima] {len(productos)} productos encontrados")
         browser.close()
