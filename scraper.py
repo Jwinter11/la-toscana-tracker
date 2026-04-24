@@ -1315,9 +1315,25 @@ def scrape_coto(headless: bool = False, max_attempts: int | None = None) -> list
         mejor_cantidad = max(mejor_cantidad, len(productos))
 
         corrida_suficiente = len(productos) >= umbral_minimo
+        pagina_interrumpida = None
+        m_pagina = re.search(r"pagina\s+(\d+)", str(motivo), re.IGNORECASE)
+        if m_pagina:
+            pagina_interrumpida = int(m_pagina.group(1))
+        corrida_parcial_usable = (
+            not corrida_completa
+            and corrida_suficiente
+            and pagina_interrumpida is not None
+            and pagina_interrumpida >= 5
+        )
         if corrida_completa and corrida_suficiente:
             if intento > 1:
                 print(f"  [Coto] Corrida valida en intento {intento} ({len(productos)} productos).")
+            return productos
+        if corrida_parcial_usable:
+            print(
+                f"  [Coto] Corrida parcial aceptada en intento {intento} "
+                f"({len(productos)} productos hasta pagina {pagina_interrumpida})."
+            )
             return productos
 
         fallas = []
