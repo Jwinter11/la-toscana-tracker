@@ -1384,6 +1384,7 @@ def scrape_anonima(headless: bool = False, _retry_count: int = 0) -> list[dict]:
         return []
 
     productos = []
+    reintentar_visible = False
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
@@ -1570,12 +1571,14 @@ def scrape_anonima(headless: bool = False, _retry_count: int = 0) -> list[dict]:
 
         if not productos and headless and _retry_count < 1:
             print(f"  [La Anonima] Respuesta vacía. Reintentando scrape ({_retry_count + 1}/2)...")
-            browser.close()
-            time.sleep(3)
-            return scrape_anonima(headless=False, _retry_count=_retry_count + 1)
+            reintentar_visible = True
 
         print(f"  [La Anonima] {len(productos)} productos encontrados")
         browser.close()
+
+    if reintentar_visible:
+        time.sleep(3)
+        return scrape_anonima(headless=False, _retry_count=_retry_count + 1)
 
     return productos
 

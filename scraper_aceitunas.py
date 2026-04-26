@@ -820,6 +820,10 @@ def _umbral_reintento_cadena_aceitunas(cadena: str) -> int:
         return 1
     counts = sorted(counts)
     mediana = counts[len(counts) // 2]
+    if cadena == "La Anonima":
+        # El buscador de La Anonima hoy devuelve surtido mucho mas chico por sucursal.
+        # Mantenemos proteccion contra respuestas vacias, sin exigir el historico completo.
+        return max(4, int(mediana * 0.30))
     return max(3, int(mediana * 0.65))
 
 
@@ -1531,7 +1535,7 @@ def _extraer_precio_anonima(texto: str) -> float | None:
     return None
 
 
-def scrape_anonima_aceitunas(headless: bool = False) -> list[dict]:
+def scrape_anonima_aceitunas(headless: bool = False, _retry_count: int = 0) -> list[dict]:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -1539,6 +1543,7 @@ def scrape_anonima_aceitunas(headless: bool = False) -> list[dict]:
         return []
 
     productos: list[dict] = []
+    reintentar_visible = False
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
@@ -1562,15 +1567,18 @@ def scrape_anonima_aceitunas(headless: bool = False) -> list[dict]:
                     print("  [La Anonima] Sucursal Bariloche seleccionada")
                 except Exception:
                     print("  [La Anonima] No apareció modal de sucursales, continuando...")
+            else:
+                print("  [La Anonima] No se encontro input de CP, continuando...")
         except Exception as e:
             print(f"  [La Anonima] Error configurando sucursal: {e}")
 
-        # Buscar aceitunas
-        print("  [La Anonima] Buscando aceitunas...")
-        try:
-            page.goto("https://www.laanonima.com.ar/buscar/aceituna",
-                      timeout=30000, wait_until="domcontentloaded")
+        def _cargar_items_busqueda(search_url: str) -> list:
+            page.goto(search_url, timeout=30000, wait_until="domcontentloaded")
             time.sleep(3)
+            try:
+                page.wait_for_selector(".producto-item", timeout=12000)
+            except Exception:
+                time.sleep(4)
             alt_ant, sin_cambio = 0, 0
             for _ in range(60):
                 page.evaluate("window.scrollBy(0, 600)")
@@ -1585,15 +1593,36 @@ def scrape_anonima_aceitunas(headless: bool = False) -> list[dict]:
                 alt_ant = alt_act
             page.evaluate("window.scrollTo(0, 0)")
             time.sleep(1.5)
-            html = page.content()
-            print(f"  [La Anonima] Página cargada ({html.count('producto-item')} items)")
+            html_busqueda = page.content()
+            return BeautifulSoup(html_busqueda, "html.parser").select(".producto-item")
+
+        # Buscar aceitunas
+        print("  [La Anonima] Buscando aceitunas...")
+        try:
+            items = _cargar_items_busqueda("https://www.laanonima.com.ar/buscar/aceitunas")
+            print(f"  [La Anonima] Pagina cargada ({len(items)} items en HTML)")
         except Exception as e:
             print(f"  [La Anonima] Error buscando productos: {e}")
             browser.close()
-            return []
+            raise
 
-        soup    = BeautifulSoup(html, "html.parser")
-        items   = soup.select(".producto-item")
+        extra_searches = [
+            ("aceituna", "https://www.laanonima.com.ar/buscar/aceituna"),
+            ("aceitunas verdes", "https://www.laanonima.com.ar/buscar/aceitunas%20verdes"),
+            ("aceitunas negras", "https://www.laanonima.com.ar/buscar/aceitunas%20negras"),
+            ("nucete", "https://www.laanonima.com.ar/buscar/nucete"),
+            ("la sevillana", "https://www.laanonima.com.ar/buscar/la%20sevillana"),
+            ("crespi", "https://www.laanonima.com.ar/buscar/crespi"),
+        ]
+        for search_label, search_url in extra_searches:
+            try:
+                items_extra = _cargar_items_busqueda(search_url)
+                items.extend(items_extra)
+                print(f"  [La Anonima] '{search_label}' -> {len(items_extra)} items extra")
+            except Exception as e:
+                print(f"  [La Anonima] Error en busqueda extra '{search_label}': {e}")
+        print(f"  [La Anonima] .producto-item acumulados: {len(items)}")
+
         vistos: set[str] = set()
 
         for item in items:
@@ -1666,8 +1695,16 @@ def scrape_anonima_aceitunas(headless: bool = False) -> list[dict]:
                 gramaje, anon_id, url_prod,
             ))
 
+        if not productos and headless and _retry_count < 1:
+            print(f"  [La Anonima] Respuesta vacia. Reintentando scrape ({_retry_count + 1}/2)...")
+            reintentar_visible = True
+
         print(f"  [La Anonima] {len(productos)} aceitunas")
         browser.close()
+
+    if reintentar_visible:
+        time.sleep(3)
+        return scrape_anonima_aceitunas(headless=False, _retry_count=_retry_count + 1)
 
     return productos
 
