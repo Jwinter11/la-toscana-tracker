@@ -9,6 +9,14 @@ set "LOG=%ROOT%\logs_automatizacion_diaria.txt"
 set "ACEITE_TRACKER_HEADLESS=1"
 set "GIT_REMOTE=latoscana"
 set "LAST_UPDATE_FILE=%ROOT%\last_update.txt"
+set "LOCKDIR=%ROOT%\.scraper_diario.lock"
+
+"%POWERSHELL_EXE%" -NoProfile -Command "$p = '%LOCKDIR%'; if (Test-Path $p) { $i = Get-Item $p; if (((Get-Date) - $i.LastWriteTime).TotalHours -gt 6) { Remove-Item $p -Recurse -Force } }"
+mkdir "%LOCKDIR%" >nul 2>&1
+if errorlevel 1 (
+    echo [%date% %time%] Scrape omitido: ya hay otra corrida en ejecucion o quedo un lock reciente >> "%LOG%"
+    exit /b 0
+)
 
 echo [%date% %time%] Inicio de actualizacion diaria >> "%LOG%"
 
@@ -16,6 +24,7 @@ if not "%FORCE_DAILY_UPDATE%"=="1" (
     "%POWERSHELL_EXE%" -NoProfile -Command "$today = (Get-Date).Date; if (Test-Path '%LAST_UPDATE_FILE%') { $last = (Get-Item '%LAST_UPDATE_FILE%').LastWriteTime.Date; if ($last -eq $today) { exit 0 } }; exit 1" >> "%LOG%" 2>&1
     if not errorlevel 1 (
         echo [%date% %time%] Verificacion previa: scrape omitido, la base ya tiene datos completos de hoy >> "%LOG%"
+        rmdir "%LOCKDIR%" >nul 2>&1
         exit /b 0
     )
 )
@@ -57,12 +66,15 @@ goto :ok
 
 :error_aceite
 echo [%date% %time%] ERROR: fallo el scraper de aceite >> "%LOG%"
+rmdir "%LOCKDIR%" >nul 2>&1
 exit /b 1
 
 :error_aceitunas
 echo [%date% %time%] ERROR: fallo el scraper de aceitunas >> "%LOG%"
+rmdir "%LOCKDIR%" >nul 2>&1
 exit /b 1
 
 :ok
 echo [%date% %time%] Fin de actualizacion diaria >> "%LOG%"
+rmdir "%LOCKDIR%" >nul 2>&1
 exit /b 0
